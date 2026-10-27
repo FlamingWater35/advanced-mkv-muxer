@@ -1,0 +1,9 @@
+#!/bin/sh
+# Entry point used inside the AppImage.
+#
+# The application itself is the Nuitka standalone build in usr/bin: it locates
+# its bundled Resources folder relative to the executable.
+set -eu
+
+HERE=${APPDIR:-$(dirname "$(readlink -f "$0")")}
+exec "$HERE/usr/bin/Advanced-MKV-Muxer" "$@"

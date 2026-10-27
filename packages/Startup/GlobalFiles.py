@@ -60,26 +60,64 @@ def delete_old_media_files():
 
 
 script_path = sys.argv[0]  # get path of the this file
-script_folder = os.path.dirname(script_path)
+
+
+def get_bundle_folder():
+    """Return the folder that contains the bundled "Resources" directory.
+
+    Inside a Nuitka build sys.argv[0] is not reliable for this: with
+    --mode=onefile it still points at the original executable, while the
+    bundled files are unpacked into a temporary folder. __compiled__ exposes
+    the folder that holds the bundled data in both Nuitka modes.
+    """
+    compiled = globals().get("__compiled__")
+    if compiled is not None:
+        containing_dir = getattr(compiled, "containing_dir", None)
+        if containing_dir and os.path.isdir(os.path.join(containing_dir, "Resources")):
+            return containing_dir
+        # Fallback for onefile builds: the bundled files are unpacked next to
+        # this module, inside the temporary folder.
+        folder = os.path.dirname(os.path.abspath(__file__))
+        for _ in range(4):
+            if os.path.isdir(os.path.join(folder, "Resources")):
+                return folder
+            parent = os.path.dirname(folder)
+            if parent == folder:
+                break
+            folder = parent
+    return os.path.dirname(os.path.abspath(script_path))
+
+
+script_folder = get_bundle_folder()
 resources_folder = os.path.join(os.path.abspath(script_folder), Path('Resources'))
 FontFolderPath = os.path.join(os.path.abspath(resources_folder), Path('Fonts'))
 IconFolderPath = os.path.join(os.path.abspath(resources_folder), Path('Icons'))
 DLLFolderPath = os.path.join(os.path.abspath(resources_folder), Path('DLL'))
 GlobalToolsFolderPath = os.path.join(os.path.abspath(resources_folder), Path('Tools'))
-ToolsFolderPath = os.path.join(os.path.abspath(GlobalToolsFolderPath), Path('Windowsx64'))
 LanguagesFolderPath = os.path.join(os.path.abspath(resources_folder), Path('Languages'))
-LibFolderPath = ""
 if sys.platform == "win32":
     if struct.calcsize("P") * 8 == 32:
-        ToolsFolderPath = os.path.join(os.path.abspath(GlobalToolsFolderPath), Path('Windows32'))
+        ToolsPlatformFolderName = "Windows32"
     else:
-        ToolsFolderPath = os.path.join(os.path.abspath(GlobalToolsFolderPath), Path('Windows64'))
+        ToolsPlatformFolderName = "Windows64"
 elif sys.platform == "linux" or sys.platform == "linux2":
-    ToolsFolderPath = os.path.join(os.path.abspath(GlobalToolsFolderPath), Path('Linux'))
-    LibFolderPath = os.path.join(os.path.abspath(ToolsFolderPath), Path('lib'))
+    ToolsPlatformFolderName = "Linux"
 else:
-    ToolsFolderPath = os.path.join(os.path.abspath(GlobalToolsFolderPath), Path('Other Systems'))
+    ToolsPlatformFolderName = "Other Systems"
+ToolsFolderPath = os.path.join(os.path.abspath(GlobalToolsFolderPath), Path(ToolsPlatformFolderName))
+LibFolderPath = ""
+if sys.platform != "win32":
+    LibFolderPath = os.path.join(os.path.abspath(ToolsFolderPath), Path('lib'))
 AppDataFolderPath = create_app_data_folder()
+# Tools installed through "Options -> MKVToolNix Tools" live here. They take
+# precedence over the bundled ones, which also makes updates work for the
+# portable onefile build (whose Resources folder is only temporary).
+UserToolsFolderPath = os.path.join(os.path.abspath(AppDataFolderPath), Path('Tools'),
+                                   Path(ToolsPlatformFolderName))
+try:
+    os.makedirs(UserToolsFolderPath, exist_ok=True)
+except Exception:
+    pass
 MergeLogsFolderPath = os.path.join(os.path.abspath(AppDataFolderPath), Path('Logs'))
 MediaInfoFolderPath = os.path.join(os.path.abspath(AppDataFolderPath), Path('MediaInfo'))
 os.makedirs(MergeLogsFolderPath, exist_ok=True)
@@ -114,6 +152,62 @@ def update_enviro_if_not_windows():
         ENVIRONMENT["LD_LIBRARY_PATH"] = ""
     if sys.platform != "win32":
         ENVIRONMENT["LD_LIBRARY_PATH"] = f"{Path(LibFolderPath).absolute()}:{ENVIRONMENT['LD_LIBRARY_PATH']}"
+
+
+def get_tool_file_name(base_name):
+    return base_name + ".exe" if sys.platform == "win32" else base_name
+
+
+def get_tool_paths():
+    """Return the mkvmerge/mkvpropedit paths, preferring updated user tools."""
+    file_names = (get_tool_file_name("mkvmerge"), get_tool_file_name("mkvpropedit"))
+    user_paths = tuple(os.path.join(UserToolsFolderPath, file_name) for file_name in file_names)
+    if all(os.path.isfile(path) for path in user_paths):
+        return user_paths
+    return tuple(os.path.join(ToolsFolderPath, file_name) for file_name in file_names)
+
+
+def refresh_tools():
+    """Re-resolve the tool locations and query their versions.
+
+    Called once at start-up and again after tools were updated, so the running
+    session switches to the new binaries immediately.
+    """
+    global LibFolderPath, ENVIRONMENT, MKVMERGE_PATH, MKVPROPEDIT_PATH
+    global MKVMERGE_VERSION, MKVPROPEDIT_VERSION
+
+    MKVMERGE_PATH, MKVPROPEDIT_PATH = get_tool_paths()
+    if sys.platform == "win32":
+        LibFolderPath = ""
+    else:
+        LibFolderPath = os.path.join(os.path.dirname(os.path.abspath(MKVMERGE_PATH)), Path('lib'))
+    ENVIRONMENT = os.environ.copy()
+    update_enviro_if_not_windows()
+
+    MKVPROPEDIT_VERSION = get_mkvpropedit_version()
+    MKVMERGE_VERSION = get_mkvmerge_version()
+    if "mkvmerge" not in MKVMERGE_VERSION:
+        logging.warning("Could not use portable mkvmerge. Trying system version...")
+        MKVMERGE_PATH = "mkvmerge"
+        MKVMERGE_VERSION = get_mkvmerge_version()
+        if "mkvmerge" not in MKVMERGE_VERSION:
+            MKVMERGE_VERSION = "mkvmerge: not found!"
+            raise Exception("mkvmerge file! ")
+        else:
+            logging.info("mkvmerge OK")
+    else:
+        logging.info("mkvmerge OK")
+    if "mkvpropedit" not in MKVPROPEDIT_VERSION:
+        logging.warning("Could not use portable mkvpropedit. Trying system version...")
+        MKVPROPEDIT_PATH = "mkvpropedit"
+        MKVPROPEDIT_VERSION = get_mkvpropedit_version()
+        if "mkvpropedit" not in MKVPROPEDIT_VERSION:
+            MKVPROPEDIT_VERSION = "mkvpropedit: not found!"
+            raise Exception("mkvpropedit file! ")
+        else:
+            logging.info("mkvpropedit OK")
+    else:
+        logging.info("mkvpropedit OK")
 
 
 try:
@@ -181,34 +275,7 @@ try:
     mkvmergeJsonInfoFilePath = os.path.join(os.path.abspath(AppDataFolderPath), "MkvmergeInfo.json")
     SettingJsonInfoFilePath = os.path.join(os.path.abspath(AppDataFolderPath), "setting.json")
     TaskBarLibFilePath = os.path.join(os.path.abspath(DLLFolderPath), "TaskbarLib.tlb")
-    MKVPROPEDIT_PATH = os.path.join(os.path.abspath(ToolsFolderPath), "mkvpropedit")
-    MKVMERGE_PATH = os.path.join(os.path.abspath(ToolsFolderPath), "mkvmerge")
-    ENVIRONMENT = os.environ.copy()
-    update_enviro_if_not_windows()
-    MKVPROPEDIT_VERSION = get_mkvpropedit_version()
-    MKVMERGE_VERSION = get_mkvmerge_version()
-    if "mkvmerge" not in MKVMERGE_VERSION:
-        logging.warning("Could not use portable mkvmerge. Trying system version...")
-        MKVMERGE_PATH = "mkvmerge"
-        MKVMERGE_VERSION = get_mkvmerge_version()
-        if "mkvmerge" not in MKVMERGE_VERSION:
-            MKVMERGE_VERSION = "mkvmerge: not found!"
-            raise Exception("mkvmerge file! ")
-        else:
-            logging.info("mkvmerge OK")
-    else:
-        logging.info("mkvmerge OK")
-    if "mkvpropedit" not in MKVPROPEDIT_VERSION:
-        logging.warning("Could not use portable mkvpropedit. Trying system version...")
-        MKVPROPEDIT_PATH = "mkvpropedit"
-        MKVPROPEDIT_VERSION = get_mkvpropedit_version()
-        if "mkvpropedit" not in MKVPROPEDIT_VERSION:
-            MKVPROPEDIT_VERSION = "mkvpropedit: not found!"
-            raise Exception("mkvpropedit file! ")
-        else:
-            logging.info("mkvpropedit OK")
-    else:
-        logging.info("mkvpropedit OK")
+    refresh_tools()
 except Exception as e:
     logging.error(e)
     missing_files_message = MissingFilesMessage(error_message=str(e))

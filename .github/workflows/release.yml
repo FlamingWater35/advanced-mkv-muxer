@@ -1,0 +1,354 @@
+# Builds Advanced MKV Muxer with Nuitka and attaches the results to a draft
+# GitHub release.
+#
+# A run starts when a version tag (``v2.4.2`` or ``2.4.2``) is pushed and the
+# tagged commit is reachable from ``main``. Four artifacts are produced:
+#
+#   windows/portable  - one self-contained executable (Nuitka --mode=onefile)
+#   windows/installer - Inno Setup installer around the standalone build
+#   linux/tarball     - the standalone build as a .tar.gz
+#   linux/appimage    - the standalone build wrapped in an AppImage
+#
+# The release is created as a draft by the final job, which only runs after all
+# four builds succeeded. Nothing is published automatically.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "[0-9]*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  APP_NAME: Advanced MKV Muxer
+  APP_SLUG: Advanced-MKV-Muxer
+  PYTHON_VERSION: "3.12"
+  # Pinned so an old tag can be rebuilt with the exact same compiler version.
+  NUITKA_VERSION: "4.3.1"
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      file_version: ${{ steps.version.outputs.file_version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Check out main with full history
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify that the tag is on main
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          tag_commit="$(git rev-list -n 1 "refs/tags/${GITHUB_REF_NAME}")"
+          if git merge-base --is-ancestor "$tag_commit" HEAD; then
+            echo "Tag ${GITHUB_REF_NAME} points at ${tag_commit}, which is on main."
+          else
+            echo "::error::Tag ${GITHUB_REF_NAME} (${tag_commit}) is not on main; refusing to build a release."
+            exit 1
+          fi
+
+      - name: Read the version from the tag
+        id: version
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          if ! [[ "$version" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "::error::Tag '${GITHUB_REF_NAME}' does not yield a usable version ('${version}')."
+            exit 1
+          fi
+
+          core="${version%%-*}"
+          IFS=. read -r major minor patch _ <<< "$core"
+
+          # Windows version resources only accept up to four numeric components.
+          numeric() { case "$1" in ''|*[!0-9]*) echo 0 ;; *) echo "$1" ;; esac; }
+          file_version="$(numeric "$major").$(numeric "$minor").$(numeric "$patch").0"
+
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+
+          app_version="$(sed -n 's/^Version *= *"\(.*\)"/\1/p' packages/Startup/Version.py)"
+          if [ "$app_version" != "$version" ]; then
+            echo "::warning file=packages/Startup/Version.py::Version.py reports '${app_version}' but the tag is '${version}'."
+          fi
+
+          {
+            echo "version=${version}"
+            echo "file_version=${file_version}"
+            echo "prerelease=${prerelease}"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.variant }} (${{ matrix.platform }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        # Git Bash on Windows keeps a single syntax for all build steps.
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            variant: portable
+          - os: windows-latest
+            platform: windows
+            variant: installer
+          # Ubuntu 22.04 is the oldest image GitHub provides that still has
+          # the glibc 2.35 baseline advertised in the README.
+          - os: ubuntu-22.04
+            platform: linux
+            variant: tarball
+          - os: ubuntu-22.04
+            platform: linux
+            variant: appimage
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            patchelf libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 \
+            desktop-file-utils
+
+      - name: Install Python dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # comtypes is Windows-only, so install the same requirements.txt
+            # without it. Ubuntu 22.04 still supports Qt 6.6.
+            grep -v -i '^[[:space:]]*comtypes' requirements.txt > "${RUNNER_TEMP}/requirements-linux.txt"
+            python -m pip install -r "${RUNNER_TEMP}/requirements-linux.txt"
+          else
+            python -m pip install -r requirements.txt
+          fi
+          python -m pip install "Nuitka[onefile]==${NUITKA_VERSION}"
+
+      - name: Generate the AppImage icon
+        if: matrix.variant == 'appimage'
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          QT_QPA_PLATFORM=offscreen python - <<'PY'
+          from PySide6.QtCore import Qt
+          from PySide6.QtGui import QImage
+
+          icon = QImage("Resources/Icons/App.ico")
+          if icon.isNull():
+              raise SystemExit("Could not load Resources/Icons/App.ico")
+          icon = icon.scaled(256, 256, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+          if not icon.save("build/app.png", "PNG"):
+              raise SystemExit("Could not write build/app.png")
+          PY
+
+      - name: Build the Linux application
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          python -m nuitka --version
+          args=(
+            "--mode=standalone"
+            "--assume-yes-for-downloads"
+            "--enable-plugin=pyside6"
+            "--output-dir=build/linux"
+            "--output-filename=${APP_SLUG}"
+            # Bundled data lives next to the executable.
+            "--include-data-dir=Resources/Fonts=Resources/Fonts"
+            "--include-data-dir=Resources/Icons=Resources/Icons"
+            "--include-data-dir=Resources/Languages=Resources/Languages"
+            "--include-data-dir=Resources/Tools/Linux=Resources/Tools/Linux"
+            # The taskbar integration is Windows-only and imports comtypes,
+            # which does not exist on Linux.
+            "--nofollow-import-to=comtypes"
+            "--nofollow-import-to=packages.MainWindow"
+            "--nofollow-import-to=packages.Widgets.TaskBarProgress"
+            "--nofollow-import-to=packages.Widgets.WindowsTaskBar"
+            "--nofollow-import-to=packages.Widgets.WindowsTaskBarLib"
+          )
+          python -m nuitka "${args[@]}" main.py
+          find build/linux -maxdepth 1 -mindepth 1 | sort
+
+      - name: Build the Windows artifacts
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          # The script performs the same Nuitka build the CI uses and, for the
+          # installer variant, compiles installer/Advanced-MKV-Muxer.iss with
+          # the Inno Setup compiler from the runner image.
+          python scripts/build_windows.py \
+            --variant "${{ matrix.variant }}" \
+            --version "$VERSION" \
+            --skip-deps
+
+      - name: Package the Linux tarball
+        if: matrix.variant == 'tarball'
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          dist_dir="$(find build/linux -maxdepth 1 -type d -name '*.dist' -print -quit)"
+          if [ -z "$dist_dir" ]; then
+            echo "::error::Nuitka did not produce a .dist folder."
+            exit 1
+          fi
+
+          rm -rf staging
+          mkdir -p "staging/${APP_SLUG}"
+          cp -a "${dist_dir}/." "staging/${APP_SLUG}/"
+
+          # The binary and the bundled tools must be executable.
+          test -x "staging/${APP_SLUG}/${APP_SLUG}"
+          test -x "staging/${APP_SLUG}/Resources/Tools/Linux/mkvmerge"
+
+          tar -czf "dist/${APP_SLUG}-${VERSION}-linux-x64.tar.gz" -C staging "${APP_SLUG}"
+
+      - name: Package the AppImage
+        if: matrix.variant == 'appimage'
+        run: |
+          set -euo pipefail
+          dist_dir="$(find build/linux -maxdepth 1 -type d -name '*.dist' -print -quit)"
+          if [ -z "$dist_dir" ]; then
+            echo "::error::Nuitka did not produce a .dist folder."
+            exit 1
+          fi
+
+          appdir="build/appimage/${APP_SLUG}.AppDir"
+          rm -rf build/appimage
+          mkdir -p "$appdir/usr/bin" \
+                   "$appdir/usr/share/applications" \
+                   "$appdir/usr/share/icons/hicolor/256x256/apps" \
+                   dist
+
+          cp -a "${dist_dir}/." "$appdir/usr/bin/"
+          install -m 0755 installer/linux/AppRun "$appdir/AppRun"
+          install -m 0644 installer/linux/advanced-mkv-muxer.desktop "$appdir/advanced-mkv-muxer.desktop"
+          install -m 0644 installer/linux/advanced-mkv-muxer.desktop "$appdir/usr/share/applications/advanced-mkv-muxer.desktop"
+          install -m 0644 build/app.png "$appdir/advanced-mkv-muxer.png"
+          install -m 0644 build/app.png "$appdir/usr/share/icons/hicolor/256x256/apps/advanced-mkv-muxer.png"
+          ln -sf advanced-mkv-muxer.png "$appdir/.DirIcon"
+
+          mkdir -p build/tools
+          curl -fsSL --retry 3 -o build/tools/appimagetool \
+            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x build/tools/appimagetool
+
+          asset="dist/${APP_SLUG}-${VERSION}-linux-x64.AppImage"
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 build/tools/appimagetool "$appdir" "$asset"
+          chmod +x "$asset"
+
+      - name: Record the artifact path
+        id: artifact
+        run: |
+          set -euo pipefail
+          case "${{ matrix.platform }}-${{ matrix.variant }}" in
+            windows-portable)
+              path="dist/${APP_SLUG}-${VERSION}-windows-x64-portable.exe" ;;
+            windows-installer)
+              path="dist/${APP_SLUG}-${VERSION}-windows-x64-setup.exe" ;;
+            linux-tarball)
+              path="dist/${APP_SLUG}-${VERSION}-linux-x64.tar.gz" ;;
+            linux-appimage)
+              path="dist/${APP_SLUG}-${VERSION}-linux-x64.AppImage" ;;
+            *)
+              echo "::error::Unknown variant '${{ matrix.platform }}-${{ matrix.variant }}'."
+              exit 1 ;;
+          esac
+
+          if [ ! -f "$path" ]; then
+            echo "::error::Expected artifact '${path}' was not produced."
+            ls -la dist || true
+            exit 1
+          fi
+          ls -lh "$path"
+          echo "path=${path}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.APP_SLUG }}-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.variant }}
+          path: ${{ steps.artifact.outputs.path }}
+          # The archives are already compressed; keep them as single files.
+          archive: false
+          if-no-files-found: error
+          retention-days: 7
+
+  draft-release:
+    name: Create draft release
+    needs:
+      - prepare
+      - build
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Download the build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ${{ env.APP_SLUG }}-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(release-assets/*)
+
+          echo "Downloaded assets:"
+          printf '  %s\n' "${assets[@]}"
+          if [ "${#assets[@]}" -ne 4 ]; then
+            echo "::error::Expected 4 assets, found ${#assets[@]}."
+            exit 1
+          fi
+
+          args=(--draft --title "${APP_NAME} ${VERSION}")
+          if [ "$PRERELEASE" = "true" ]; then
+            args+=(--prerelease)
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "A release for ${TAG} already exists; replacing its assets."
+            gh release upload "$TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$TAG" "${args[@]}" --generate-notes "${assets[@]}"
+          fi
+
+          gh release view "$TAG" --json isDraft,isPrerelease,url \
+            --jq '"draft=\(.isDraft) prerelease=\(.isPrerelease) \(.url)"'
+
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+            echo "::warning::Release ${TAG} is not a draft (it was published earlier); assets were updated but the release state was left unchanged."
+          fi

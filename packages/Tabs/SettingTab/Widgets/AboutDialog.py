@@ -4,7 +4,7 @@ from PySide6.QtGui import QPixmap, QFont
 from PySide6.QtWidgets import QLabel, \
      QPushButton, QHBoxLayout, QVBoxLayout
 
-from packages.Startup.GlobalFiles import AppIconPath, MKVMERGE_VERSION, MKVPROPEDIT_VERSION
+from packages.Startup import GlobalFiles
 from packages.Startup.GlobalIcons import AboutIcon
 from packages.Startup.PreDefined import GitHubRepoUrlTag, GPLV2UrlTag, GitHubIssuesUrlTag
 from packages.Startup.Version import Version
@@ -19,11 +19,11 @@ class AboutDialog(MyDialog):
         self.setWindowTitle("About Advanced MKV Muxer")
         self.setWindowIcon(AboutIcon)
         self.app_icon_label = QLabel()
-        self.app_icon_label.setPixmap(QPixmap(AppIconPath).scaledToHeight(175))
+        self.app_icon_label.setPixmap(QPixmap(GlobalFiles.AppIconPath).scaledToHeight(175))
         self.app_name_label = QLabel("Advanced MKV Muxer")
         self.app_current_version = QLabel("Version: " + str(Version))
-        self.app_mkvmerge_current_version = QLabel(str(MKVMERGE_VERSION))
-        self.app_mkvpropedit_current_version = QLabel(str(MKVPROPEDIT_VERSION))
+        self.app_mkvmerge_current_version = QLabel(str(GlobalFiles.MKVMERGE_VERSION))
+        self.app_mkvpropedit_current_version = QLabel(str(GlobalFiles.MKVPROPEDIT_VERSION))
         self.app_link_github_label = QLabel("Check for updates on: " + GitHubRepoUrlTag)
         self.app_link_github_label.setOpenExternalLinks(True)
         self.app_licence_label = QLabel("Advanced MKV Muxer is released under the " + GPLV2UrlTag + "+ licence")

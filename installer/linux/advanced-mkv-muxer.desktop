@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Advanced MKV Muxer
+GenericName=Matroska Multiplexer
+Comment=Mux videos with subtitles, audio, chapters and attachments
+Exec=Advanced-MKV-Muxer
+Icon=advanced-mkv-muxer
+Terminal=false
+Categories=AudioVideo;Video;
+Keywords=mkv;mux;multiplex;subtitle;audio;video;
+StartupNotify=true

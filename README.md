@@ -93,6 +93,7 @@ _A preview of the application in action:_
 - Save a log file
 - Set your default directories, languages, and file extensions to be remembered for future runs
 - Optimize your muxing by modifying the source file when feasible. A prompt will appear when this option is available
+- Check for new MKVToolNix releases from the options dialog: the installed `mkvmerge`/`mkvpropedit` versions are shown, and a newer release can be downloaded and installed for the current platform with one click
 
 ## 📝Notes
 
@@ -144,11 +145,13 @@ sudo apt install libxcb-cursor0
 
 ### Updating The MKVmerge version
 
-You can manually update the mkvmerge version the app uses, but do this only if you're sure of what you're doing, as it may require a reinstallation:
+The easiest way is the built-in updater: open **Options → MKVToolNix Tools**, which shows the installed `mkvmerge`/`mkvpropedit` versions, then press **Check for Updates**. If a newer release exists, **Update** downloads it from [mkvtoolnix.download](https://mkvtoolnix.download/downloads.html), verifies the checksum (Windows), installs the tools for the current platform and switches to them immediately. Updated tools are stored per user in the application data folder, so the update also works for the portable (onefile) build.
+
+If you prefer to do it manually, you can still replace the files yourself — but do this only if you're sure of what you're doing, as it may require a reinstallation:
 
 ```bash
 # Navigate to the app's installation directory, e.g. on Windows:
-"C:\\Program Files (x86)\\Advanced MKV Muxer"
+"Program Files (x86)\\Advanced MKV Muxer"
 # Go to Resources\\Tools\\ [your operating system], and replace mkvmerge.exe and mkvpropedit.exe with the newer version you have
 ```
 

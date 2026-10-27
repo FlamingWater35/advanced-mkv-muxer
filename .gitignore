@@ -1,11 +1,16 @@
 /Lib/
 /Include/
 /Scripts/
+# Keep the repository's own build helpers: /Scripts (virtualenv) is matched
+# case-insensitively on Windows and would otherwise hide /scripts as well.
+!/scripts/
 /venv/
 /pyvenv.cfg
 /.idea/
 /MkvEnv/
 /MkvEnv32/
+/build/
+/dist/
 /Testing/test.py
 /Testing/
 *.pyc
