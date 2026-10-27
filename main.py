@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 # import faulthandler
 import logging
-import signal
 import sys
 from traceback import format_exception
-import psutil
+
 from packages.Startup.MainApplication import MainApplication
 from packages.Startup import GlobalFiles
 from packages.Startup import GlobalIcons
+from packages.Startup.ChildProcesses import kill_child_processes
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import QApplication
 from packages.Widgets.WarningDialog import WarningDialog
@@ -51,15 +51,10 @@ def create_window():
 
 def run_application():
     app_execute = app.exec()
-    kill_all_children()
+    # The window already stopped and joined its workers in closeEvent; this is
+    # only a safety net for tools that outlived it.
+    kill_child_processes()
     sys.exit(app_execute)
-
-
-def kill_all_children():
-    current_process = psutil.Process()
-    children = current_process.children(recursive=True)
-    for child in children:
-        child.send_signal(signal.SIGTERM)
 
 
 def logger_exception(exception_type, exception_value, exception_trace_back):

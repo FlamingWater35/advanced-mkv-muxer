@@ -1,7 +1,4 @@
-import os
-import time
-from pathlib import Path
-
+import shiboken6
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import Qt, QFontMetrics
 from PySide6.QtWidgets import QAbstractItemView, QTableWidgetItem, QHeaderView, QLabel
@@ -9,7 +6,6 @@ from PySide6.QtWidgets import QAbstractItemView, QTableWidgetItem, QHeaderView, 
 from packages.Startup.Options import Options
 from packages.Startup.InitializeScreenResolution import screen_size
 from packages.Tabs.GlobalSetting import GlobalSetting, get_readable_filesize
-from packages.Tabs.MuxSetting.Widgets.ConfirmUsingMkvpropedit import ConfirmUsingMkvpropedit
 from packages.Tabs.MuxSetting.Widgets.MuxingParams import MuxingParams
 from packages.Tabs.MuxSetting.Widgets.ProgreeBar import ProgressBar
 from packages.Tabs.MuxSetting.Widgets.SingleJobData import SingleJobData
@@ -93,20 +89,6 @@ def generate_tool_tip_for_subtitle_file(subtitle_full_path="C:/Test", subtitle_n
                 "\nDouble click for more details")
 
 
-def get_file_name_with_mkv_extension(file_name):
-    file_extension_start_index = file_name.rfind(".")
-    new_file_name_with_mkv_extension = file_name[:file_extension_start_index] + ".mkv"
-    return new_file_name_with_mkv_extension
-
-
-# noinspection PyUnresolvedReferences
-def change_file_extension_to_mkv_with_random_suffix(file_name):
-    file_extension_start_index = file_name.rfind(".")
-    new_file_name_with_mkv_extension = file_name[
-                                       :file_extension_start_index] + "#" + GlobalSetting.RANDOM_OUTPUT_SUFFIX + ".mkv "
-    return new_file_name_with_mkv_extension
-
-
 def set_is_job_crc_required(new_job):
     new_job.is_crc_calculating_required = GlobalSetting.MUX_SETTING_ADD_CRC
     new_job.is_crc_removing_required = GlobalSetting.MUX_SETTING_REMOVE_OLD_CRC
@@ -126,82 +108,6 @@ def set_attachments_setting_for_job(new_job, new_row_id):
                 new_job.attachments_absolute_path.append(file_to_attach)
 
 
-Valid_CRC_String = "0123456789ABCDEF"
-
-
-def get_file_name_without_crc(file_name):
-    file_name = str(file_name)
-    file_name_without_crc = file_name
-    bracket_left_index = file_name.rfind("[")
-    bracket_right_index = file_name.rfind("]")
-    if (bracket_right_index - bracket_left_index - 1) == 8:
-        valid_counter = 0
-        for i in range(bracket_left_index + 1, bracket_right_index):
-            if file_name[i] in Valid_CRC_String:
-                valid_counter += 1
-        if valid_counter == 8:
-            file_name_without_crc = file_name[:bracket_left_index] + file_name[
-                                                                     bracket_right_index + 1:]
-    extension_index = file_name_without_crc.rfind(".")
-    file_name_without_extension = file_name_without_crc[:extension_index]
-    last_valid_char = 0
-    for i in range(len(file_name_without_extension) - 1, -1, -1):
-        if file_name_without_extension[i] != " ":
-            last_valid_char = i
-            break
-    file_name_without_crc = file_name_without_crc[
-                            :last_valid_char + 1] + file_name_without_crc[extension_index:]
-    return file_name_without_crc
-
-
-def get_file_name_with_crc(file_name, crc_string):
-    file_name = str(file_name)
-    file_name_without_crc = file_name
-    bracket_left_index = file_name.rfind("[")
-    bracket_right_index = file_name.rfind("]")
-    if (bracket_right_index - bracket_left_index - 1) == 8:
-        valid_counter = 0
-        for i in range(bracket_left_index + 1, bracket_right_index):
-            if file_name[i] in Valid_CRC_String:
-                valid_counter += 1
-        if valid_counter == 8:
-            file_name_without_crc = file_name[:bracket_left_index] + file_name[
-                                                                     bracket_right_index + 1:]
-    extension_index = file_name_without_crc.rfind(".")
-    file_name_without_extension = file_name_without_crc[:extension_index]
-    last_valid_char = 0
-    for i in range(len(file_name_without_extension) - 1, -1, -1):
-        if file_name_without_extension[i] != " ":
-            last_valid_char = i
-            break
-    if file_name_without_crc[last_valid_char] in ['[', ']', ')', '(', '}', '{']:
-        file_name_with_crc = file_name_without_crc[
-                             :last_valid_char + 1] + "[" + crc_string + "]" + file_name_without_crc[
-                                                                              extension_index:]
-    else:
-        file_name_with_crc = file_name_without_crc[
-                             :last_valid_char + 1] + " [" + crc_string + "]" + file_name_without_crc[
-                                                                               extension_index:]
-    return file_name_with_crc
-
-
-def calculate_size_after_muxing(finished_job: SingleJobData):
-    try:
-        output_video_size_bytes = os.path.getsize(finished_job.output_video_absolute_path)
-    except:
-        output_video_size_bytes = 0
-    return output_video_size_bytes
-
-
-def rename_file(file_name_old_crc_absolute_path, file_name_with_crc_absolute_path):
-    for i in range(500):
-        try:
-            os.rename(file_name_old_crc_absolute_path, file_name_with_crc_absolute_path)
-            return
-        except Exception as e:
-            time.sleep(0.05)
-
-
 class JobQueueTable(TableWidget):
     update_total_progress_signal = Signal(int)
     increase_number_of_done_jobs_signal = Signal()
@@ -217,6 +123,8 @@ class JobQueueTable(TableWidget):
         self.total_progress = 0
         self.number_of_jobs = 0
         self.number_of_done_jobs = 0
+        self.start_muxing_worker = None
+        self.start_muxing_thread = None
         self.need_column_width_set = True
         self.column_ids = {
             "Name": 0,
@@ -300,11 +208,11 @@ class JobQueueTable(TableWidget):
         new_job.size_before_muxing = " " + GlobalSetting.VIDEO_FILES_SIZE_LIST[new_row_id]
         self.setCellWidget(new_row_id, self.column_ids["Size Before"], QLabel(new_job.size_before_muxing))
 
-    def set_row_value_size_after_muxing(self, finished_job: SingleJobData, row_index):
-        output_video_size_bytes = calculate_size_after_muxing(finished_job)
-        if output_video_size_bytes == 0:
-            self.delete_video_output_with_zero_size(file_path=finished_job.output_video_absolute_path)
+    def set_row_value_size_after_muxing(self, output_video_size_bytes, row_index):
+        # The size is measured by the muxing worker: the GUI thread never
+        # touches the output file system.
         size_after_muxing = " " + get_readable_filesize(output_video_size_bytes)
+        self.data[row_index].size_after_muxing = size_after_muxing
         self.setCellWidget(row_index, self.column_ids["Size After"], QLabel(size_after_muxing))
 
     def set_row_value_chapter(self, new_job, new_row_id):
@@ -642,7 +550,6 @@ class JobQueueTable(TableWidget):
         self.start_muxing_worker.cancel_signal.connect(self.start_muxing_thread.quit)
         self.start_muxing_worker.cancel_signal.connect(self.start_muxing_worker.deleteLater)
         self.start_muxing_thread.finished.connect(self.start_muxing_thread.deleteLater)
-        self.start_muxing_worker.mkvpropedit_good_signal.connect(self.show_confirm_using_mkvpropedit)
         self.start_muxing_worker.progress_signal.connect(self.update_progress)
         self.start_muxing_worker.job_started_signal.connect(self.new_job_started)
         self.start_muxing_worker.job_succeeded_signal.connect(self.job_done_successfully)
@@ -650,6 +557,38 @@ class JobQueueTable(TableWidget):
         self.start_muxing_worker.pause_from_error_occurred_signal.connect(self.pause_from_error_occurred)
         self.start_muxing_worker.crc_progress_signal.connect(self.update_crc_progress)
         self.start_muxing_thread.start()
+
+    def request_stop_workers(self):
+        """Ask the muxing worker to stop starting new jobs (non-blocking)."""
+        worker = self.get_live_muxing_worker()
+        if worker is not None:
+            worker.request_stop()
+
+    def stop_workers(self, timeout_ms=5000):
+        """Stop and join every muxing thread. Used when the application exits.
+
+        Without this the QThread objects are destroyed by the interpreter while
+        still running, which makes Qt abort the process.
+        """
+        worker = self.get_live_muxing_worker()
+        if worker is not None:
+            worker.stop_all_threads(timeout_ms)
+        thread = self.start_muxing_thread
+        if thread is not None and shiboken6.isValid(thread) and thread.isRunning():
+            thread.quit()
+            thread.wait(timeout_ms)
+
+    def get_live_muxing_worker(self):
+        """Return the worker, unless Qt already deleted its C++ object."""
+        worker = self.start_muxing_worker
+        if worker is None or not shiboken6.isValid(worker):
+            return None
+        return worker
+
+    def request_worker_pause(self):
+        worker = self.get_live_muxing_worker()
+        if worker is not None:
+            worker.request_pause()
 
     def clear_queue(self):
         self.data = []  # type: list[SingleJobData]
@@ -659,35 +598,17 @@ class JobQueueTable(TableWidget):
         self.number_of_done_jobs = 0
         GlobalSetting.JOB_QUEUE_EMPTY = True
 
-    def show_confirm_using_mkvpropedit(self):
-        confirm_dialog = ConfirmUsingMkvpropedit(parent=self)
-        confirm_dialog.execute()
-        if confirm_dialog.result == "mkvpropedit":
-            self.start_muxing_worker.use_mkvpropedit = True
-            self.start_muxing_worker.waiting_for_mkvpropedit_confirm = False
-        elif confirm_dialog.result == "mkvmerge":
-            self.start_muxing_worker.use_mkvpropedit = False
-            self.start_muxing_worker.use_mkvmerge = True
-            self.start_muxing_worker.waiting_for_mkvpropedit_confirm = False
-        else:
-            self.start_muxing_worker.cancel = True
-            self.start_muxing_worker.use_mkvpropedit = False
-            self.start_muxing_worker.use_mkvmerge = False
-            self.start_muxing_worker.waiting_for_mkvpropedit_confirm = False
-            if self.start_muxing_worker.current_job == 0:
-                self.cancel_done_signal.emit()
-            else:
-                self.paused_done_signal.emit()
-
     def update_progress(self, params: MuxingParams):
         job_index = params.index
         new_progress = params.progress
+        if not self.is_job_index_valid(job_index):
+            return
         if params.error:
             self.data[job_index].done = True
             self.data[job_index].error_occurred = True
             self.data[job_index].muxing_message = params.message
             if GlobalSetting.MUX_SETTING_ABORT_ON_ERRORS:
-                self.start_muxing_worker.pause = True
+                self.request_worker_pause()
             self.set_job_status_bad(row_index=job_index)
             self.update_muxing_progress(job_index, 0, params)
         else:
@@ -696,22 +617,12 @@ class JobQueueTable(TableWidget):
     def update_crc_progress(self, progress):
         self.update_status_job_widget("CRC: " + str(progress))
 
-    def get_output_file_name_absolute(self, job_index):
-        if self.data[job_index].used_mkvpropedit:
-            return Path(self.data[job_index].video_name_absolute)
-        else:
-            folder_path = Path(GlobalSetting.DESTINATION_FOLDER_PATH)
-            output_video_name = Path(get_file_name_with_mkv_extension(self.data[job_index].video_name))
-            return os.path.join(folder_path, output_video_name)
-
-    def get_output_file_name_folder_path_absolute(self, job_index):
-        if self.data[job_index].used_mkvpropedit or GlobalSetting.OVERWRITE_SOURCE_FILES:
-            return os.path.dirname(self.data[job_index].video_name_absolute)
-
-        else:
-            return Path(GlobalSetting.DESTINATION_FOLDER_PATH)
+    def is_job_index_valid(self, job_index):
+        return 0 <= job_index < len(self.data)
 
     def update_muxing_progress(self, job_index, new_progress, params):
+        if not self.is_job_index_valid(job_index) or self.number_of_jobs == 0:
+            return
         self.total_progress -= self.data[job_index].progress
         self.data[job_index].progress = new_progress
         self.update_status_job_widget(new_progress)
@@ -725,63 +636,24 @@ class JobQueueTable(TableWidget):
         except:
             pass
 
-    def delete_source_file_if_overwritten_enabled(self, job_index):
-        if GlobalSetting.OVERWRITE_SOURCE_FILES and not self.data[job_index].used_mkvpropedit:
-            os.remove(self.data[job_index].video_name_absolute)
-            folder_path = os.path.dirname(self.data[job_index].video_name_absolute)
-            output_video_name = Path(change_file_extension_to_mkv_with_random_suffix(self.data[job_index].video_name))
-            output_video_name_absolute = os.path.join(folder_path, output_video_name)
-            original_output_video_name = Path(get_file_name_with_mkv_extension(self.data[job_index].video_name))
-            output_file_name_folder_path_absolute = self.get_output_file_name_folder_path_absolute(job_index)
-            original_file_name_absolute_path = os.path.join(output_file_name_folder_path_absolute,
-                                                            original_output_video_name)
-            rename_file(output_video_name_absolute, original_file_name_absolute_path)
-
-    def rename_output_file_if_needed(self, job_index):
-        if self.data[job_index].is_crc_calculating_required:
-            crc_string = self.data[job_index].new_crc
-            output_video_name = Path(get_file_name_with_mkv_extension(self.data[job_index].video_name))
-            file_name_with_crc = Path(get_file_name_with_crc(output_video_name, crc_string))
-            output_file_name_folder_path_absolute = self.get_output_file_name_folder_path_absolute(job_index)
-            file_name_with_crc_absolute_path = os.path.join(output_file_name_folder_path_absolute, file_name_with_crc)
-            file_name_old_crc_absolute_path = os.path.join(output_file_name_folder_path_absolute, output_video_name)
-            rename_file(file_name_old_crc_absolute_path, file_name_with_crc_absolute_path)
-            self.data[job_index].output_video_name = file_name_with_crc
-            self.data[job_index].output_video_absolute_path = file_name_with_crc_absolute_path
-        elif self.data[job_index].is_crc_removing_required:
-            output_video_name = Path(get_file_name_with_mkv_extension(self.data[job_index].video_name))
-            output_file_name_folder_path_absolute = self.get_output_file_name_folder_path_absolute(job_index)
-            file_name_old_absolute_path = os.path.join(output_file_name_folder_path_absolute, output_video_name)
-            file_name_without_crc = Path(get_file_name_without_crc(output_video_name))
-            file_name_without_crc_absolute_path = os.path.join(output_file_name_folder_path_absolute,
-                                                               file_name_without_crc)
-            rename_file(file_name_old_absolute_path, file_name_without_crc_absolute_path)
-            self.data[job_index].output_video_name = file_name_without_crc
-            self.data[job_index].output_video_absolute_path = file_name_without_crc_absolute_path
-        else:
-            output_video_name = Path(get_file_name_with_mkv_extension(self.data[job_index].video_name))
-            output_file_name_folder_path_absolute = self.get_output_file_name_folder_path_absolute(job_index)
-            file_name_absolute_path = os.path.join(output_file_name_folder_path_absolute, output_video_name)
-            self.data[job_index].output_video_name = output_video_name
-            self.data[job_index].output_video_absolute_path = file_name_absolute_path
-
-    def job_done_successfully(self, job_index):
+    def job_done_successfully(self, job_index, output_size):
+        if not self.is_job_index_valid(job_index):
+            return
         self.data[job_index].done = True
         self.number_of_done_jobs += 1
         self.increase_number_of_done_jobs_signal.emit()
         self.set_job_status_ok(row_index=job_index)
-        self.delete_source_file_if_overwritten_enabled(job_index=job_index)
-        self.rename_output_file_if_needed(job_index=job_index)
-        self.set_row_value_size_after_muxing(self.data[job_index], job_index)
+        self.set_row_value_size_after_muxing(output_size, job_index)
 
-    def job_error_occurred(self, job_index):
+    def job_error_occurred(self, job_index, output_size):
+        if not self.is_job_index_valid(job_index):
+            return
         self.data[job_index].done = True
         self.data[job_index].error_occurred = True
         if GlobalSetting.MUX_SETTING_ABORT_ON_ERRORS:
-            self.start_muxing_worker.pause = True
+            self.request_worker_pause()
         self.set_job_status_bad(row_index=job_index)
-        self.rename_output_file_if_needed(job_index=job_index)
-        self.set_row_value_size_after_muxing(self.data[job_index], job_index)
+        self.set_row_value_size_after_muxing(output_size, job_index)
 
     def set_job_status_ok(self, row_index):
         self.job_status_widget.stop_loading()
@@ -801,7 +673,7 @@ class JobQueueTable(TableWidget):
         self.job_status_widget.start_loading()
 
     def pause_muxing(self):
-        self.start_muxing_worker.pause = True
+        self.request_worker_pause()
 
     def paused_done(self):
         self.paused_done_signal.emit()
@@ -811,9 +683,3 @@ class JobQueueTable(TableWidget):
 
     def pause_from_error_occurred(self):
         self.pause_from_error_occurred_signal.emit()
-
-    def delete_video_output_with_zero_size(self, file_path):
-        try:
-            os.remove(file_path)
-        except:
-            pass

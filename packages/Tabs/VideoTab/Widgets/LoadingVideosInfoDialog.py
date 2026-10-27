@@ -1,5 +1,3 @@
-import time
-
 from PySide6.QtCore import Qt, QThread, QSize
 from PySide6.QtGui import QMovie
 from PySide6.QtWidgets import QLabel, QHBoxLayout
@@ -67,7 +65,7 @@ class LoadingVideosInfoDialog(MyDialog):
         self.load_icon_movie.start()
 
     def stop_loading(self):
-        time.sleep(0.1)
+        # No sleep here: this slot runs on the GUI thread.
         self.load_icon_movie.stop()
 
         self.close()

@@ -745,6 +745,14 @@ class MuxSettingTab(QWidget):
         self.control_queue_button.setDisabled(True)
         self.control_queue_button.set_state_pausing_multiplexing()
 
+    def request_stop_workers(self):
+        """Tell the muxing worker to stop before the window is destroyed."""
+        self.job_queue_layout.request_stop_workers()
+
+    def stop_workers(self):
+        """Join the muxing threads so Qt does not destroy a running thread."""
+        self.job_queue_layout.stop_workers()
+
     def paused_done(self):
         self.control_queue_button.set_state_resume_multiplexing()
         self.clear_job_queue_button.setDisabled(False)

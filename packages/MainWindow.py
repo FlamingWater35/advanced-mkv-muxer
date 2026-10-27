@@ -3,6 +3,7 @@ from PySide6.QtGui import Qt
 from PySide6.QtWidgets import QFrame, QVBoxLayout
 
 from packages.Startup import GlobalIcons
+from packages.Startup.ChildProcesses import kill_child_processes
 from packages.Startup.Options import Options, get_names_list_of_presets, save_options
 from packages.Startup.InitializeScreenResolution import width_factor, height_factor
 from packages.Startup.Version import Version
@@ -86,6 +87,7 @@ class MainWindow(MyMainWindow):
         if muxing_on:
             want_to_exit = check_if_exit_when_muxing_on()
             if want_to_exit:
+                self.shutdown_workers()
                 super().closeEvent(event)
             else:
                 event.ignore()
@@ -94,11 +96,25 @@ class MainWindow(MyMainWindow):
         if option_selected:
             want_to_exit = check_if_exit_while_selected_one_option()
             if want_to_exit:
+                self.shutdown_workers()
                 super().closeEvent(event)
             else:
                 event.ignore()
             return
+        self.shutdown_workers()
         super().closeEvent(event)
+
+    def shutdown_workers(self):
+        """Stop and join the muxing threads before the window is destroyed.
+
+        A QThread that is still running when it is destroyed makes Qt abort the
+        process, so the threads are stopped while the UI objects still exist.
+        The external tools are killed first: a blocked subprocess.run() only
+        returns once its child process is gone.
+        """
+        self.tabs.request_stop_workers()
+        kill_child_processes()
+        self.tabs.stop_workers()
 
     @staticmethod
     def check_if_need_to_show_choose_preset_dialog(parent):

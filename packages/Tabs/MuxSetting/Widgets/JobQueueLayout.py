@@ -57,6 +57,12 @@ class JobQueueLayout(QGridLayout):
     def start_muxing(self):
         self.table.start_muxing()
 
+    def request_stop_workers(self):
+        self.table.request_stop_workers()
+
+    def stop_workers(self):
+        self.table.stop_workers()
+
     def paused_done(self):
         self.paused_done_signal.emit()
 

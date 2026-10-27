@@ -3,6 +3,7 @@ from PySide6.QtGui import Qt
 from PySide6.QtWidgets import QFrame, QVBoxLayout
 
 from packages.Startup import GlobalIcons
+from packages.Startup.ChildProcesses import kill_child_processes
 from packages.Startup.InitializeScreenResolution import width_factor, height_factor
 from packages.Startup.Options import Options, save_options, get_names_list_of_presets
 from packages.Startup.Version import Version
@@ -65,6 +66,7 @@ class MainWindowNonWindowsSystem(MyMainWindow):
         if muxing_on:
             want_to_exit = check_if_exit_when_muxing_on()
             if want_to_exit:
+                self.shutdown_workers()
                 super().closeEvent(event)
             else:
                 event.ignore()
@@ -73,11 +75,20 @@ class MainWindowNonWindowsSystem(MyMainWindow):
         if option_selected:
             want_to_exit = check_if_exit_while_selected_one_option()
             if want_to_exit:
+                self.shutdown_workers()
                 super().closeEvent(event)
             else:
                 event.ignore()
             return
+        self.shutdown_workers()
         super().closeEvent(event)
+
+    def shutdown_workers(self):
+        """Stop and join the muxing threads before the window is destroyed."""
+        self.tabs.request_stop_workers()
+        kill_child_processes()
+        self.tabs.stop_workers()
+
     @staticmethod
     def check_if_need_to_show_choose_preset_dialog(parent):
         if Options.Choose_Preset_On_Startup:

@@ -88,6 +88,12 @@ class TabsManager(QTabWidget):
     def start_muxing(self):
         self.task_bar_start_muxing_signal.emit()
 
+    def request_stop_workers(self):
+        self.mux_setting_tab.request_stop_workers()
+
+    def stop_workers(self):
+        self.mux_setting_tab.stop_workers()
+
     def setup_tabs_theme(self):
         activate_color, disabled_color = get_activate_and_disabled_color_according_to_current_theme()
         self.set_tab_color(tab_index=self.tabs_ids["Video"], color_string=activate_color)
