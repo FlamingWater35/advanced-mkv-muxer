@@ -426,7 +426,7 @@ class MuxSettingTab(QWidget):
             except Exception as e:
                 write_to_log_file(e)
                 invalid_dialog = InvalidPathDialog(window_title="Permission Denied",
-                                                   error_message="MKV Muxing Batch GUI lacks write "
+                                                   error_message="Advanced MKV Muxer lacks write "
                                                                  "permissions on Destination folder", parent=self)
                 invalid_dialog.execute()
                 self.destination_path_lineEdit.setText(GlobalSetting.DESTINATION_FOLDER_PATH)
@@ -730,7 +730,7 @@ class MuxSettingTab(QWidget):
                 except Exception as e:
                     write_to_log_file(e)
                     error_dialog = ErrorMuxingDialog(window_title="Permission Denied",
-                                                     info_message="Can't save log file, MKV Muxing Batch GUI lacks write "
+                                                     info_message="Can't save log file, Advanced MKV Muxer lacks write "
                                                                   "permissions on Destination folder",
                                                      parent=self)
                     error_dialog.execute()

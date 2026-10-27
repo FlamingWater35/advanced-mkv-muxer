@@ -26,7 +26,7 @@ def create_app_data_folder():
         app_data = home / ".local/share"
     elif sys.platform == "darwin":
         app_data = home / "Library/Application Support"
-    my_app_data_folder = app_data / "MKV Muxing Batch GUI"
+    my_app_data_folder = app_data / "Advanced MKV Muxer"
     try:
         os.makedirs(my_app_data_folder, exist_ok=True)
     except Exception as e:

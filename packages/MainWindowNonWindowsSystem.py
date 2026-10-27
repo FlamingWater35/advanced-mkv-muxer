@@ -30,7 +30,7 @@ class MainWindowNonWindowsSystem(MyMainWindow):
     def __init__(self, args, parent=None):
         super().__init__(args=args, parent=parent)
         self.resize(int(width_factor * 1100), int(height_factor * 635))
-        self.setWindowTitle("MKV Muxing Batch GUI v" + str(Version))
+        self.setWindowTitle("Advanced MKV Muxer v" + str(Version))
         self.setWindowIcon(GlobalIcons.AppIcon)
         self.tabs = TabsManager()
         self.tabs_frame = QFrame()

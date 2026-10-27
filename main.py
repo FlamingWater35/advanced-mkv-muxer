@@ -15,7 +15,7 @@ from packages.Widgets.WarningDialog import WarningDialog
 if sys.platform == "win32":
     import ctypes
 
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("myappid")
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Advanced.MKVMuxer")
     from packages.MainWindow import MainWindow
 else:
     from packages.MainWindowNonWindowsSystem import MainWindowNonWindowsSystem as MainWindow
