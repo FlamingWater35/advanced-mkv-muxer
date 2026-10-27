@@ -1,4 +1,4 @@
-MKVToolNix 81.0
+MKVToolNix 103.0
 =================
 
 # Table of contents
@@ -15,9 +15,10 @@ MKVToolNix 81.0
         2. [Configuration and compilation](#242-configuration-and-compilation)
     5. [Notes for compilation on (Open)Solaris](#25-notes-for-compilation-on-opensolaris)
     6. [Unit tests](#26-unit-tests)
-3. [Reporting bugs & getting support](#3-reporting-bugs-getting-support)
+3. [Reporting bugs & security issues & getting support](#3-reporting-bugs-security-issues-getting-support)
     1. [Reporting bugs](#31-reporting-bugs)
-    2. [Getting support](#32-getting-support)
+    2. [Reporting seucrity issues)(#32-reporting-security-issues)
+    3. [Getting support](#33-getting-support)
 4. [Test suite and continuous integration tests](#4-test-suite-and-continuous-integration-tests)
 5. [Code of Conduct](#5-code-of-conduct)
 6. [Included third-party components and their licenses](#6-included-third-party-components-and-their-licenses)
@@ -61,7 +62,7 @@ Eduard Geier. They're licensed under the terms of the
 The newest version can always be found at
 https://mkvtoolnix.download/
 
-Moritz Bunkus <moritz@bunkus.org>
+Moritz Bunkus <mo@bunkus.online>
 
 
 # 2. Installation
@@ -81,15 +82,8 @@ In order to compile MKVToolNix, you need a couple of libraries. Most of
 them should be available pre-compiled for your distribution. The
 programs and libraries you absolutely need are:
 
-- A C++ compiler that supports several features of the C++11, C++14
-  and C++17 standards: initializer lists, range-based `for` loops,
-  right angle brackets, the `auto` keyword, lambda functions, the
-  `nullptr` keyword, tuples, alias declarations, `std::make_unique()`,
-  digit separators, binary literals, generic lambdas, user-defined
-  literals for `std::string`, `[[maybe_unused]]` attribute, nested
-  namespace definition, structured bindings, `std::optional`,
-  `std::regex`. Others may be needed, too. For GCC this means at least
-  v8; for clang v7 or later.
+- A C++ compiler that supports the C++20 standard or newer. For GCC
+  this means at least v10; for clang v10 or later.
 
 - [libOgg](http://downloads.xiph.org/releases/ogg/) and
   [libVorbis](http://downloads.xiph.org/releases/vorbis/) for access to Ogg/OGM
@@ -99,11 +93,17 @@ programs and libraries you absolutely need are:
 
 - [Boost](http://www.boost.org/) — Several of Boost's libraries are
   used, e.g. `filesystem`, `multi-precision`, `operators`,
-  `system`. At least v1.66.0 is required.
+  `system`. At least v1.74.0 is required.
+
+Furthermore you need to have several programs installed:
 
 - [libxslt's xsltproc binary](http://xmlsoft.org/libxslt/) and
   [DocBook XSL stylesheets](https://sourceforge.net/projects/docbook/files/docbook-xsl/)
   — for creating man pages from XML documents
+
+- [Inkscape](https://inkscape.org) and
+  [ImageMagick](https://imagemagick.org/) — for converting SVG icons
+  into different types
 
 You also need the `rake` or `drake` build program. I suggest `rake`
 v10.0.0 or newer (this is included with Ruby 2.1) as it offers
@@ -124,10 +124,10 @@ distribution instead of relying on the bundled versions.
 These libraries are:
 
 - [fmt](http://fmtlib.net/) — a small, safe and fast formatting
-  library. Version 6.1.0 or later is required.
+  library. Version 8.0.0 or later is required.
 
-- [libEBML v1.4.4](http://dl.matroska.org/downloads/libebml/) or later
-  and [libMatroska v1.7.1](http://dl.matroska.org/downloads/libmatroska/)
+- [libEBML v1.4.7](http://dl.matroska.org/downloads/libebml/) or later
+  and [libMatroska v1.7.2](http://dl.matroska.org/downloads/libmatroska/)
   or later for low-level access to Matroska files. Instructions on how to
   compile them are a bit further down in this file.
 
@@ -137,7 +137,7 @@ These libraries are:
 - [nlohmann's JSON](https://github.com/nlohmann/json) — JSON for
   Modern C++
 
-- [Qt](http://www.qt.io/) v5.9.0 or newer — a cross-platform library
+- [Qt](http://www.qt.io/) v6.2.0 or newer — a cross-platform library
   including a UI toolkit. The library is needed for all programs, even
   if you decide not to build MKVToolNix GUI.
 
@@ -159,8 +159,7 @@ built. These include:
 - [libFLAC](http://downloads.xiph.org/releases/flac/) for FLAC
   support (Free Lossless Audio Codec)
 
-- [po4a](https://po4a.alioth.debian.org/) for building the translated
-  man pages
+- [po4a](https://www.po4a.org/) for building the translated man pages
 
 ## 2.3. Building libEBML and libMatroska
 
@@ -195,7 +194,7 @@ for both Unix/Linux and Windows.
 
 First clone my Git repository with this command:
 
-    git clone https://gitlab.com/mbunkus/mkvtoolnix.git
+    git clone https://codeberg.org/mbunkus/mkvtoolnix.git
 
 Now change to the MKVToolNix directory with `cd mkvtoolnix` and run
 `./autogen.sh` which will generate the "configure" script. You need
@@ -259,7 +258,7 @@ do this, you have to follow these steps:
         rake tests:run_unit
 
 
-# 3. Reporting bugs & getting support
+# 3. Reporting bugs & security issues & getting support
 
 # 3.1. Reporting bugs
 
@@ -267,7 +266,7 @@ If you're sure you've found a bug — e.g. if one of my programs crashes
 with an obscur error message, or if the resulting file is missing part
 of the original data, then by all means submit a bug report.
 
-I use [GitLab's issue system](https://gitlab.com/mbunkus/mkvtoolnix/issues)
+I use [Codeberg's issue system](https://codeberg.org/mbunkus/mkvtoolnix/issues)
 as my bug database. You can submit your bug reports there. Please be as
 verbose as possible — e.g. include the command line, if you use Windows
 or Linux etc.pp.
@@ -276,20 +275,29 @@ If at all possible, please include sample files as well so that I can
 reproduce the issue. If they are larger than 1 MB, please upload
 them somewhere and post a link in the issue. You can also upload them
 to my FTP server. Details on how to connect can be found in the
-[MKVToolNix FAQ](https://gitlab.com/mbunkus/mkvtoolnix/wikis/FTP-server).
+[MKVToolNix FAQ](https://codeberg.org/mbunkus/mkvtoolnix/wiki/FTP-server).
 
-# 3.2. Getting support
+# 3.2. Reporting security issues
+
+If you think you've found a security issue, please reach out via email
+to the author, Moritz Bunkus <mo@bunkus.online>. Please don't file an
+issue on Codeberg for it as security issues are usually sensitive &
+Codeberg doesn't support private/restricted access to issues. I will
+prioritize reported security issues over regular bug reports. Thank
+you.
+
+# 3.3. Getting support
 
 The issue tracker above is not meant for general support which you can
 find in the following places:
 
-* The [MKVToolNix sub-Reddit](https://www.reddit.com/r/mkvtoolnix) is
+* The [MKVToolNix help forum](https://help.mkvtoolnix.download/) is
   suitable for all kinds of questions.
 * The MKVToolNix thread on [Doom9's
   forum](http://forum.doom9.org/showthread.php?t=155732) is more
   suited for in-depth technical questions.
-* There's also the IRC channel `#matroska` on the [Freenode IRC
-  network](https://freenode.net/) where we hang out. The main
+* There's also the IRC channel `#matroska` on the [Libera IRC
+  network](https://libera.chat/) where we hang out. The main
   MKVToolNix author Moritz Bunkus is known as "mosu" there.
 
 

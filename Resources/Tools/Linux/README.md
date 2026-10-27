@@ -1,4 +1,4 @@
-MKVToolNix 45.0.0
+MKVToolNix 103.0
 =================
 
 # Table of contents
@@ -15,23 +15,26 @@ MKVToolNix 45.0.0
         2. [Configuration and compilation](#242-configuration-and-compilation)
     5. [Notes for compilation on (Open)Solaris](#25-notes-for-compilation-on-opensolaris)
     6. [Unit tests](#26-unit-tests)
-3. [Reporting bugs](#3-reporting-bugs)
+3. [Reporting bugs & security issues & getting support](#3-reporting-bugs-security-issues-getting-support)
+    1. [Reporting bugs](#31-reporting-bugs)
+    2. [Reporting seucrity issues)(#32-reporting-security-issues)
+    3. [Getting support](#33-getting-support)
 4. [Test suite and continuous integration tests](#4-test-suite-and-continuous-integration-tests)
 5. [Code of Conduct](#5-code-of-conduct)
 6. [Included third-party components and their licenses](#6-included-third-party-components-and-their-licenses)
     1. [avilib](#61-avilib)
-    2. [Boost's utf8_codecvt_facet](#62-boosts-utf8_codecvt_facet)
-    3. [libEBML](#63-libebml)
-    4. [libMatroska](#64-libmatroska)
-    5. [librmff](#65-librmff)
-    6. [nlohmann's JSON](#66-nlohmanns-json)
-    7. [pugixml](#67-pugixml)
-    8. [utf8-cpp](#68-utf8-cpp)
-    9. [Oxygen icons and sound files](#69-oxygen-icons-and-sound-files)
-    10. [MKVToolNix icons](#610-mkvtoolnix-icons)
-    11. [QtWaitingSpinner](#611-qtwaitingspinner)
-    12. [Fancy tab widget](#612-fancy-tab-widget)
-    13. [fmt](#613-fmt)
+    2. [libEBML](#63-libebml)
+    3. [libMatroska](#64-libmatroska)
+    4. [librmff](#65-librmff)
+    5. [nlohmann's JSON](#66-nlohmanns-json)
+    6. [pugixml](#67-pugixml)
+    7. [utf8-cpp](#68-utf8-cpp)
+    8. [Oxygen icons and sound files](#69-oxygen-icons-and-sound-files)
+    9. [MKVToolNix icons](#610-mkvtoolnix-icons)
+    10. [QtWaitingSpinner](#611-qtwaitingspinner)
+    11. [Fancy tab widget](#612-fancy-tab-widget)
+    12. [fmt](#613-fmt)
+    13. [QgsCollapsibleGroupBox](#613-qgscollapsiblegroupbox)
 
 -----------------
 
@@ -59,7 +62,7 @@ Eduard Geier. They're licensed under the terms of the
 The newest version can always be found at
 https://mkvtoolnix.download/
 
-Moritz Bunkus <moritz@bunkus.org>
+Moritz Bunkus <mo@bunkus.online>
 
 
 # 2. Installation
@@ -79,15 +82,8 @@ In order to compile MKVToolNix, you need a couple of libraries. Most of
 them should be available pre-compiled for your distribution. The
 programs and libraries you absolutely need are:
 
-- A C++ compiler that supports several features of the C++11, C++14
-  and C++17 standards: initializer lists, range-based `for` loops,
-  right angle brackets, the `auto` keyword, lambda functions, the
-  `nullptr` keyword, tuples, alias declarations, `std::make_unique()`,
-  digit separators, binary literals, generic lambdas, user-defined
-  literals for `std::string`, `[[maybe_unused]]` attribute, nested
-  namespace definition, structured bindings, `std::optional`,
-  `std::regex`. Others may be needed, too. For GCC this means at least
-  v7; for clang v4 or later.
+- A C++ compiler that supports the C++20 standard or newer. For GCC
+  this means at least v10; for clang v10 or later.
 
 - [libOgg](http://downloads.xiph.org/releases/ogg/) and
   [libVorbis](http://downloads.xiph.org/releases/vorbis/) for access to Ogg/OGM
@@ -96,12 +92,18 @@ programs and libraries you absolutely need are:
 - [zlib](http://www.zlib.net/) — a compression library
 
 - [Boost](http://www.boost.org/) — Several of Boost's libraries are
-  used: `filesystem`, `system`, `math`, `operators`, `Range`,
-  `rational`, `variant`. At least v1.60.0 is required.
+  used, e.g. `filesystem`, `multi-precision`, `operators`,
+  `system`. At least v1.74.0 is required.
+
+Furthermore you need to have several programs installed:
 
 - [libxslt's xsltproc binary](http://xmlsoft.org/libxslt/) and
   [DocBook XSL stylesheets](https://sourceforge.net/projects/docbook/files/docbook-xsl/)
   — for creating man pages from XML documents
+
+- [Inkscape](https://inkscape.org) and
+  [ImageMagick](https://imagemagick.org/) — for converting SVG icons
+  into different types
 
 You also need the `rake` or `drake` build program. I suggest `rake`
 v10.0.0 or newer (this is included with Ruby 2.1) as it offers
@@ -122,10 +124,10 @@ distribution instead of relying on the bundled versions.
 These libraries are:
 
 - [fmt](http://fmtlib.net/) — a small, safe and fast formatting
-  library. Version 3 or later is required.
+  library. Version 8.0.0 or later is required.
 
-- [libEBML v1.3.5](http://dl.matroska.org/downloads/libebml/) or later
-  and [libMatroska v1.4.8](http://dl.matroska.org/downloads/libmatroska/)
+- [libEBML v1.4.7](http://dl.matroska.org/downloads/libebml/) or later
+  and [libMatroska v1.7.2](http://dl.matroska.org/downloads/libmatroska/)
   or later for low-level access to Matroska files. Instructions on how to
   compile them are a bit further down in this file.
 
@@ -134,6 +136,10 @@ These libraries are:
 
 - [nlohmann's JSON](https://github.com/nlohmann/json) — JSON for
   Modern C++
+
+- [Qt](http://www.qt.io/) v6.2.0 or newer — a cross-platform library
+  including a UI toolkit. The library is needed for all programs, even
+  if you decide not to build MKVToolNix GUI.
 
 - [pugixml](http://pugixml.org/) — light-weight, simple and fast XML
   parser for C++ with XPath support
@@ -146,37 +152,24 @@ These libraries are:
 Other libraries are optional and only limit the features that are
 built. These include:
 
-- [Qt](http://www.qt.io/) v5.9.0 or newer — a cross-platform GUI
-  toolkit. You need this if you want to use the MKVToolNix GUI.
-
 - [cmark](https://github.com/commonmark/cmark) — the CommonMark
-  parsing and rendering library in C is required when building the Qt
-  GUIs.
+  parsing and rendering library in C is required when building
+  MKVToolNix GUI.
 
 - [libFLAC](http://downloads.xiph.org/releases/flac/) for FLAC
   support (Free Lossless Audio Codec)
 
-- [lzo](http://www.oberhumer.com/opensource/lzo/) and
-  [bzip2](http://www.bzip.org/) are compression libraries. These are
-  the least important libraries as almost no application supports
-  Matroska content that is compressed with either of these libs. The
-  aforementioned zlib is what every program supports.
-
-- [libMagic](http://www.darwinsys.com/file/) from the "file" package
-  for automatic content type detection
-
-- [po4a](https://po4a.alioth.debian.org/) for building the translated
-  man pages
+- [po4a](https://www.po4a.org/) for building the translated man pages
 
 ## 2.3. Building libEBML and libMatroska
 
 This is optional as MKVToolNix comes with its own set of the
 libraries. It will use them if no version is found on the system.
 
-Start by either downloading releases of [libEBML
-v1.3.5](http://dl.matroska.org/downloads/libebml/) and [libMatroska
-v1.4.8](http://dl.matroska.org/downloads/libmatroska/) or by getting
-fresh copies from their git repositories:
+Start by either downloading the latest releases of
+[libEBML](http://dl.matroska.org/downloads/libebml/) and
+[libMatroska](http://dl.matroska.org/downloads/libmatroska/) or by
+getting fresh copies from their git repositories:
 
     git clone https://github.com/Matroska-Org/libebml.git
     git clone https://github.com/Matroska-Org/libmatroska.git
@@ -201,7 +194,7 @@ for both Unix/Linux and Windows.
 
 First clone my Git repository with this command:
 
-    git clone https://gitlab.com/mbunkus/mkvtoolnix.git
+    git clone https://codeberg.org/mbunkus/mkvtoolnix.git
 
 Now change to the MKVToolNix directory with `cd mkvtoolnix` and run
 `./autogen.sh` which will generate the "configure" script. You need
@@ -265,13 +258,15 @@ do this, you have to follow these steps:
         rake tests:run_unit
 
 
-# 3. Reporting bugs
+# 3. Reporting bugs & security issues & getting support
+
+# 3.1. Reporting bugs
 
 If you're sure you've found a bug — e.g. if one of my programs crashes
 with an obscur error message, or if the resulting file is missing part
 of the original data, then by all means submit a bug report.
 
-I use [GitLab's issue system](https://gitlab.com/mbunkus/mkvtoolnix/issues)
+I use [Codeberg's issue system](https://codeberg.org/mbunkus/mkvtoolnix/issues)
 as my bug database. You can submit your bug reports there. Please be as
 verbose as possible — e.g. include the command line, if you use Windows
 or Linux etc.pp.
@@ -280,7 +275,31 @@ If at all possible, please include sample files as well so that I can
 reproduce the issue. If they are larger than 1 MB, please upload
 them somewhere and post a link in the issue. You can also upload them
 to my FTP server. Details on how to connect can be found in the
-[MKVToolNix FAQ](https://gitlab.com/mbunkus/mkvtoolnix/wikis/FTP-server).
+[MKVToolNix FAQ](https://codeberg.org/mbunkus/mkvtoolnix/wiki/FTP-server).
+
+# 3.2. Reporting security issues
+
+If you think you've found a security issue, please reach out via email
+to the author, Moritz Bunkus <mo@bunkus.online>. Please don't file an
+issue on Codeberg for it as security issues are usually sensitive &
+Codeberg doesn't support private/restricted access to issues. I will
+prioritize reported security issues over regular bug reports. Thank
+you.
+
+# 3.3. Getting support
+
+The issue tracker above is not meant for general support which you can
+find in the following places:
+
+* The [MKVToolNix help forum](https://help.mkvtoolnix.download/) is
+  suitable for all kinds of questions.
+* The MKVToolNix thread on [Doom9's
+  forum](http://forum.doom9.org/showthread.php?t=155732) is more
+  suited for in-depth technical questions.
+* There's also the IRC channel `#matroska` on the [Libera IRC
+  network](https://libera.chat/) where we hang out. The main
+  MKVToolNix author Moritz Bunkus is known as "mosu" there.
+
 
 # 4. Test suite and continuous integration tests
 
@@ -335,38 +354,25 @@ package.
   * URL: the `transcode` project doesn't seem to have a home page anymore
   * Corresponding files: `lib/avilib-0.6.10/*`
 
-## 6.2. Boost's utf8_codecvt_facet
-
-A class, `utf8_codecvt_facet`, derived from `std::codecvt<wchar_t, char>`,
-which can be used to convert utf8 data in files into `wchar_t` strings
-in the application.
-
-  * Copyright:
-    * 2001 Ronald Garcia, Indiana University (garcia@osl.iu.edu)
-    * Andrew Lumsdaine, Indiana University (lums@osl.iu.edu)
-  * License: Boost Software License - Version 1.0 (see `doc/licenses/Boost-1.0.txt`)
-  * URL: http://www.boost.org
-  * Corresponding files: `lib/boost/*`
-
-## 6.3. libEBML
+## 6.2. libEBML
 
 A C++ library to parse EBML files
 
-  * Copyright: 2002-2010 Steve Lhomme et. al.
+  * Copyright: 2002-2021 Steve Lhomme et. al.
   * License: GNU Lesser General Public License v2.1 or later (see `doc/licenses/LGPL-2.1.txt`)
   * URL: http://www.matroska.org/
   * Corresponding files: `lib/libebml/*`
 
-## 6.4. libMatroska
+## 6.3. libMatroska
 
 A C++ library to parse Matroska files
 
-  * Copyright: 2002-2010 Steve Lhomme et. al.
+  * Copyright: 2002-2020 Steve Lhomme et. al.
   * License: GNU Lesser General Public License v2.1 or later (see `doc/licenses/LGPL-2.1.txt`)
   * URL: http://www.matroska.org/
   * Corresponding files: `lib/libmatroska/*`
 
-## 6.5. librmff
+## 6.4. librmff
 
 librmff is short for 'RealMedia file format access library'. It aims
 at providing the programmer an easy way to read and write RealMedia
@@ -377,44 +383,38 @@ files.
   * URL: https://www.bunkus.org/videotools/librmff/index.html
   * Corresponding files: `lib/librmff/*`
 
-## 6.6. nlohmann's JSON
+## 6.5. nlohmann's JSON
 
 JSON for Modern C++
 
-  * Copyright: 2013-2019 Niels Lohmann
+  * Copyright: 2013-2021 Niels Lohmann
   * License: MIT (see `doc/licenses/nlohmann-json-MIT.txt`)
   * URL: https://github.com/nlohmann/json
   * Corresponding files: `lib/nlohmann-json/*`
 
-## 6.7. pugixml
+## 6.6. pugixml
 
 An XML processing library
 
-  * Copyright: 2006–2019 by Arseny Kapoulkine <arseny.kapoulkine@gmail.com>
+  * Copyright: 2006–2020 by Arseny Kapoulkine <arseny.kapoulkine@gmail.com>
   * License: MIT (see `doc/licenses/pugixml-MIT.txt`)
-  * URL: http://pugixml.org/
+  * URL: https://pugixml.org/
   * Corresponding files: `lib/pugixml/*`
 
-## 6.8. utf8-cpp
+## 6.7. utf8-cpp
 
 UTF-8 with C++ in a Portable Way
 
-  * Copyright: 2006 Nemanja Trifunovic
-  * License: custom (see `doc/licenses/utf8-cpp-custom.txt`)
-  * URL: http://utfcpp.sourceforge.net/
+  * Copyright: 2006-2021 Nemanja Trifunovic
+  * License: Boost Software License 1.0 (see `doc/licenses/Boost-1.0.txt`)
+  * URL: https://github.com/nemtrif/utfcpp/
   * Corresponding files: `lib/utf8-cpp/*`
 
-## 6.9. Oxygen icons and sound files
+## 6.8. Oxygen icons and sound files
 
-Most of the icons included in this package originate from the Oxygen
-Project. These include all files in the `share/icons` sub-directory
-safe for those whose name starts with `mkv`.
-
-The preferred form of modification are the SVG icons. These are not
-part of the binary distribution of MKVToolNix, but they are contained
-in the source code in the `icons/scalable` sub-directory. You can
-obtain the source code from the
-[MKVToolNix website](https://mkvtoolnix.download/).
+A lot of the icons included in this package originate from the Oxygen
+Project. These include all files in the `share/icons/oxygen`
+sub-directory.
 
 All of the sound files in the `share/sounds` sub-directory originate
 from the Oxygen project.
@@ -422,10 +422,10 @@ from the Oxygen project.
   * License: GNU Lesser General Public License v3 (see `doc/licenses/LGPL-3.0.txt`)
   * URL: https://techbase.kde.org/Projects/Oxygen
   * Corresponding files:
-    * `share/icons/*` (except for `share/icons/*/mkv*`)
+    * `share/icons/oxygen/*`
     * `share/sounds/*`
 
-## 6.10. MKVToolNix icons
+## 6.9. MKVToolNix icons
 
   * Copyright:
     * 2011 Alexandr Grigorcea <cahr.gr@gmail.com>
@@ -434,7 +434,7 @@ from the Oxygen project.
   * License: Creative Commons Attribution 3.0 Unported (CC BY 3.0) (see `doc/licenses/CC-BY-3.0.txt`)
   * Corresponding files: `share/icons/*/mkv*`
 
-## 6.11. QtWaitingSpinner
+## 6.10. QtWaitingSpinner
 
 A highly configurable, custom Qt widget for showing "waiting" or
 "loading" spinner icons in Qt applications
@@ -447,7 +447,7 @@ A highly configurable, custom Qt widget for showing "waiting" or
   * URL: https://github.com/snowwlex/QtWaitingSpinner
   * Corresponding files: `src/mkvtoolnix-gui/util/waiting_spinning_widget.{h,cpp}`
 
-## 6.12. Fancy tab widget
+## 6.11. Fancy tab widget
 
 A beefed-up tab widget class for Qt extracted from the Qt Creator project
 
@@ -455,11 +455,29 @@ A beefed-up tab widget class for Qt extracted from the Qt Creator project
   * License: GNU General Public License v2 (see `COPYING`)
   * Corresponding files: `src/mkvtoolnix-gui/util/fancy_tab_widget.{h,cpp}`
 
-## 6.13. fmt
+## 6.12. fmt
 
 Small, safe and fast formatting library
 
-  * Copyright: 2012–2019 by Victor Zverovich
+  * Copyright: 2012–present by Victor Zverovich
   * License: BSD (see `doc/licenses/fmt-BSD.txt`)
-  * URL: http://fmtlib.net/latest/
+  * URL: https://fmt.dev/latest/
   * Corresponding files: `lib/fmt/*`
+
+## 6.13. QgsCollapsibleGroupBox
+
+A groupbox that collapses/expands when toggled. Extracted from the QGIS project.
+
+  * Copyright: 2012–present by Etienne Tourigny
+  * License: GNU General Public License v2 or later (see `COPYING`)
+  * URL: https://github.com/qgis/QGIS
+  * Corresponding files: `src/mkvtoolnix-gui/util/qgs_collapsible_group_box.{h,cpp}`
+
+## 6.14. Windows theme
+
+The theme (palette) used on Windows
+
+  * Copyright: 2016 The Qt Company Ltd.
+  * License: GNU General Public License v2 (see `COPYING`)
+  * Corresponding files: `src/mkvtoolnix-gui/app/windows.cpp`
+

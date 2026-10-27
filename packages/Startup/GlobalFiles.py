@@ -261,8 +261,6 @@ try:
     SpinnerIconPath = os.path.join(os.path.abspath(IconFolderPath), 'Spinner.gif')
     GoodJobIconPath = os.path.join(os.path.abspath(IconFolderPath), 'GoodJob.png')
     SettingIconPath = os.path.join(os.path.abspath(IconFolderPath), 'Setting.svg')
-    TelegramIconPath = os.path.join(os.path.abspath(IconFolderPath), 'Telegram.svg')
-    TwitterIconPath = os.path.join(os.path.abspath(IconFolderPath), 'Twitter.svg')
     ThemeIconPath = os.path.join(os.path.abspath(IconFolderPath), 'Day_And_Night.png')
     AppIconPath = os.path.join(os.path.abspath(IconFolderPath), 'App.ico')
     LanguagesFilePath = os.path.join(os.path.abspath(LanguagesFolderPath), "iso639_language_list.json")
