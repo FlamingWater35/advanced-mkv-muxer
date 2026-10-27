@@ -9,4 +9,6 @@
 /Testing/test.py
 /Testing/
 *.pyc
+__pycache__/
+/tests/.tmp/
 test.py

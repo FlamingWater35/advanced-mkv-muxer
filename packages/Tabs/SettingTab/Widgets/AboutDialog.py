@@ -8,7 +8,6 @@ from packages.Startup.GlobalFiles import AppIconPath, MKVMERGE_VERSION, MKVPROPE
 from packages.Startup.GlobalIcons import AboutIcon
 from packages.Startup.PreDefined import GitHubRepoUrlTag, GPLV2UrlTag, GitHubIssuesUrlTag
 from packages.Startup.Version import Version
-from packages.Tabs.SettingTab.Widgets.DonateButton import DonateButton
 from packages.Tabs.SettingTab.Widgets.TelegramLabel import TelegramLabel
 from packages.Tabs.SettingTab.Widgets.TwitterLabel import TwitterLabel
 from packages.Widgets.MyDialog import MyDialog
@@ -43,10 +42,8 @@ class AboutDialog(MyDialog):
         self.social_twitter_label = TwitterLabel()
         self.social_telegram_label = TelegramLabel()
         self.ok_button = QPushButton("OK")
-        self.donate_button = DonateButton()
         self.buttons_layout = QHBoxLayout()
         self.buttons_layout.addStretch(0)
-        # self.buttons_layout.addWidget(self.donate_button)
         self.buttons_layout.addWidget(self.ok_button)
         self.buttons_layout.addStretch(0)
         self.social_media_layout = QHBoxLayout()

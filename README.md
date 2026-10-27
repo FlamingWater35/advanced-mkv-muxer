@@ -23,6 +23,7 @@ A robust application for muxing(merging) videos with subtitles, audios, chapters
   - [For Linux Users](#for-linux-users)
   - [Using Python Code](#using-python-code-version)
   - [Updating the MKVmerge version](#updating-the-mkvmerge-version)
+- [Running Tests](#running-tests)
 - [Credits & Attribution](#credits--attribution)
 
 - [License](#license)
@@ -152,6 +153,16 @@ You can manually update the mkvmerge version the app uses, but do this only if y
 ```
 
 > For linux users it's recommended to just clear `Resources\\Tools\\ [your operating system]` folder and then install mkvtoolnix on your system from [here](https://mkvtoolnix.download/downloads.html) and the app will automatically detect it.
+
+## 🧪Running Tests
+
+After installing the dependencies, run the test suite from the repository root:
+
+```bash
+python -m unittest discover -s tests -t . -v
+```
+
+The tests use a temporary profile under `tests/.tmp/`, so they do not touch your real application settings.
 
 ## 🙏Credits & Attribution
 

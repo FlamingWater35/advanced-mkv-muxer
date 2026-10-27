@@ -153,7 +153,6 @@ try:
     LeftArrowIconPath = os.path.join(os.path.abspath(IconFolderPath), 'LeftArrow.png')
     RightArrowIconPath = os.path.join(os.path.abspath(IconFolderPath), 'RightArrow.png')
     ErrorBigIconPath = os.path.join(os.path.abspath(IconFolderPath), 'ErrorBig.png')
-    DonationsIconPath = os.path.join(os.path.abspath(IconFolderPath), 'Donations.png')
     ClearIconPath = os.path.join(os.path.abspath(IconFolderPath), 'Clear.svg')
     RefreshIconPath = os.path.join(os.path.abspath(IconFolderPath), 'Refresh.png')
     TopLightIconPath = os.path.join(os.path.abspath(IconFolderPath), 'Top_Light.svg')

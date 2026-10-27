@@ -7,7 +7,7 @@ from packages.Startup.GlobalFiles import OkIconPath, ErrorIconPath, ErrorBigIcon
     StartMultiplexingIconPath, PauseMultiplexingIconPath, AddToQueueIconPath, ClearIconPath, TopLightIconPath, \
     DownLightIconPath, UpLightIconPath, BottomLightIconPath, TopDarkIconPath, DownDarkIconPath, UpDarkIconPath, \
     BottomDarkIconPath, FolderIconPath, SettingIconPath, TelegramIconPath, TwitterIconPath, LeftArrowIconPath, \
-    RightArrowIconPath, DonationsIconPath, ThemeIconPath, AppIconPath, SubtitleDarkIconPath, RenameIconPath, \
+    RightArrowIconPath, ThemeIconPath, AppIconPath, SubtitleDarkIconPath, RenameIconPath, \
     EmptyIconPath, TrueCheckIconPath, PresetLightIconPath, PresetDarkIconPath, SelectedItemIconPath, \
     UnSelectedItemIconPath
 
@@ -54,6 +54,5 @@ TelegramIcon = QIcon(QPixmap(TelegramIconPath))
 TwitterIcon = QIcon(QPixmap(TwitterIconPath))
 LeftArrowIcon = QIcon(QPixmap(LeftArrowIconPath))
 RightArrowIcon = QIcon(QPixmap(RightArrowIconPath))
-DonationsIcon = QIcon(QPixmap(DonationsIconPath))
 ThemeIcon = QIcon(QPixmap(ThemeIconPath))
 AppIcon = QIcon(QPixmap(AppIconPath))

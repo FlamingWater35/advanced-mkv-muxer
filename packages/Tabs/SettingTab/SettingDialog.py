@@ -9,7 +9,6 @@ from packages.Startup.GlobalFiles import InfoIconPath
 from packages.Startup.GlobalIcons import SettingIcon
 from packages.Startup.InitializeScreenResolution import screen_size
 from packages.Tabs.SettingTab.Widgets.AboutButton import AboutButton
-from packages.Tabs.SettingTab.Widgets.DonateButton import DonateButton
 from packages.Tabs.SettingTab.Widgets.PresetTabComboBox import PresetTabComboBox
 from packages.Tabs.SettingTab.Widgets.PresetTabDeleteButton import PresetTabDeleteButton
 from packages.Tabs.SettingTab.Widgets.PresetTabRenameButton import PresetTabRenameButton
@@ -37,7 +36,6 @@ class SettingDialog(MyDialog):
         self.setting_info_text_icon_label.setPixmap(self.setting_info_text_icon_pixmap)
         self.setting_info_text_label = QLabel("Changes will take effect on next launch")
         self.setting_about_button = AboutButton()
-        self.setting_donate_button = DonateButton()
 
         self.preset_tabs = []
         self.preset_counter = 0
@@ -69,7 +67,6 @@ class SettingDialog(MyDialog):
         self.setting_info_layout = QHBoxLayout()
         self.setting_info_layout.addWidget(self.setting_info_text_icon_label, stretch=0)
         self.setting_info_layout.addWidget(self.setting_info_text_label, stretch=1)
-        self.setting_info_layout.addWidget(self.setting_donate_button, stretch=0, alignment=Qt.AlignmentFlag.AlignRight)
         self.setting_info_layout.addWidget(self.setting_about_button, stretch=0, alignment=Qt.AlignmentFlag.AlignRight)
 
         self.main_layout = QGridLayout()

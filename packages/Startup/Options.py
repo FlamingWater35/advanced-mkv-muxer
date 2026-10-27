@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from PySide6.QtWidgets import QWidget
 from packages.Startup.GlobalFiles import SettingJsonInfoFilePath
+from packages.Startup.SystemTheme import detect_system_dark_mode
 from packages.Widgets.SingleDefaultPresetsData import SingleDefaultPresetsData
 
 
@@ -68,9 +69,11 @@ def save_options():
 
 def read_option_file(option_file):
     option_file_path = Path(option_file)
+    theme_configured = False
     if option_file_path.is_file():
-        with open(option_file_path, "r+", encoding="UTF-8") as option_file:
+        with open(option_file_path, "r+", encoding="utf-8-sig") as option_file:
             data = json.load(option_file)
+            theme_configured = "Dark_Mode" in data
             presets = get_data_from_json(json_data=data, attribute="Presets", default_value="Old")
             if presets == "Old":
                 preset_number = 1
@@ -136,4 +139,6 @@ def read_option_file(option_file):
             Options.Choose_Preset_On_Startup = get_data_from_json(json_data=data,
                                                                   attribute="Choose_Preset_On_Startup",
                                                                   default_value=False)
+    if not theme_configured:
+        Options.Dark_Mode = detect_system_dark_mode()
     save_options()
