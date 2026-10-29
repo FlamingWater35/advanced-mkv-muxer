@@ -3,6 +3,7 @@ from PySide6.QtWidgets import QVBoxLayout, QGroupBox
 
 from packages.Startup.Options import Options
 from packages.Tabs.AttachmentTab.Widgets.AllowDuplicateAttachmentsCheckBox import AllowDuplicateAttachmentsCheckBox
+from packages.Tabs.AttachmentTab.Widgets.AutoDetectFontsCheckBox import AutoDetectFontsCheckBox
 from packages.Tabs.AttachmentTab.Widgets.AttachmentClearButton import AttachmentClearButton
 from packages.Tabs.AttachmentTab.Widgets.AttachmentSourceButton import AttachmentSourceButton
 from packages.Tabs.AttachmentTab.Widgets.AttachmentSourceLineEdit import AttachmentSourceLineEdit
@@ -11,6 +12,7 @@ from packages.Tabs.AttachmentTab.Widgets.AttachmentsTotalSizeValueLabel import A
 from packages.Tabs.AttachmentTab.Widgets.DiscardOldAttachmentsCheckBox import DiscardOldAttachmentsCheckBox
 from packages.Tabs.AttachmentTab.Widgets.ExpertModeCheckBox import ExpertModeCheckBox
 from packages.Tabs.AttachmentTab.Widgets.MatchAttachmentWidget import MatchAttachmentWidget
+from packages.Widgets.FolderWatcher import FolderWatcher
 from packages.Widgets.RefreshFilesButton import RefreshFilesButton
 from packages.Tabs.GlobalSetting import *
 from packages.Tabs.GlobalSetting import sort_names_like_windows, get_readable_filesize, get_files_names_absolute_list, \
@@ -52,6 +54,7 @@ class AttachmentSelectionSetting(GlobalSetting):
         self.attachment_source_button = AttachmentSourceButton()
         self.attachment_refresh_files_button = RefreshFilesButton()
         self.discard_old_attachments_checkBox = DiscardOldAttachmentsCheckBox()
+        self.auto_detect_fonts_checkBox = AutoDetectFontsCheckBox()
         self.allow_duplicate_attachments_checkBox = AllowDuplicateAttachmentsCheckBox()
         self.expert_mode_checkBox = ExpertModeCheckBox()
         self.table = AttachmentTable()
@@ -67,6 +70,7 @@ class AttachmentSelectionSetting(GlobalSetting):
         self.files_checked_list = []
         self.files_names_absolute_list = []
         self.files_size_list = []
+        self.folder_watcher = FolderWatcher(parent=self)
         self.setup_layouts()
         self.connect_signals()
 
@@ -101,6 +105,7 @@ class AttachmentSelectionSetting(GlobalSetting):
                 self.update_files_lists(new_path)
                 self.update_total_size()
                 self.show_files_list()
+                self.folder_watcher.watch_folder(self.folder_path)
                 self.attachment_refresh_files_button.update_current_path(new_path=new_path)
                 self.attachment_refresh_files_button.setEnabled(True)
             else:
@@ -148,16 +153,19 @@ class AttachmentSelectionSetting(GlobalSetting):
             invalid_path_dialog.execute()
 
     def get_files_list(self, folder_path):
-        temp_files_names = sort_names_like_windows(names_list=os.listdir(folder_path))
-        temp_files_names_absolute = get_files_names_absolute_list(temp_files_names, folder_path)
-        result = []
-        for i in range(len(temp_files_names)):
-            if os.path.isdir(temp_files_names_absolute[i]):
-                continue
-            if os.path.getsize(temp_files_names_absolute[i]) == 0:
-                continue
-            result.append(temp_files_names[i])
-        return result
+        return get_matching_files_in_folder(
+            folder_path,
+            include_subfolders=GlobalSetting.INCLUDE_SUBFOLDERS)
+
+    def refresh_files_from_current_folder(self):
+        """Reload the current folder, e.g. after the subfolders option changed."""
+        if not (self.folder_path and not self.folder_path.isspace() and not self.is_drag_and_drop):
+            return
+        if not GlobalSetting.JOB_QUEUE_EMPTY:
+            return
+        if self.get_files_list(self.folder_path) == self.files_names_list:
+            return
+        self.update_folder_path(self.folder_path)
 
     def show_files_list(self):
         self.table.show_files_list(files_names_list=self.files_names_list,
@@ -176,6 +184,7 @@ class AttachmentSelectionSetting(GlobalSetting):
         self.attachments_options_layout.addWidget(self.expert_mode_checkBox)
         self.attachments_options_layout.addWidget(self.allow_duplicate_attachments_checkBox)
         self.attachments_options_layout.addWidget(self.discard_old_attachments_checkBox)
+        self.attachments_options_layout.addWidget(self.auto_detect_fonts_checkBox)
 
     def setup_main_layout(self):
         self.attachment_main_layout.addWidget(self.attachment_source_label, 0, 0)
@@ -191,6 +200,8 @@ class AttachmentSelectionSetting(GlobalSetting):
         self.attachment_main_layout.addWidget(self.expert_mode_widget, 2, 0, 1, -1)
 
     def clear_files(self):
+        self.folder_watcher.clear()
+        GlobalSetting.ATTACHMENT_SEARCH_FOLDERS = []
         if self.expert_mode_checkBox.isChecked():
             self.attachment_refresh_files_button.update_current_path(new_path="")
             self.attachment_refresh_files_button.setEnabled(True)
@@ -214,9 +225,21 @@ class AttachmentSelectionSetting(GlobalSetting):
         if self.folder_path != "" and not self.folder_path.isspace() and not self.is_drag_and_drop:
             GlobalSetting.LAST_DIRECTORY_PATH = self.folder_path
 
+    def get_attachment_search_folders(self):
+        """Folders that the automatic font detection may scan (#160)."""
+        if self.folder_path != "" and not self.folder_path.isspace() and not self.is_drag_and_drop:
+            return [self.folder_path]
+        folders = []
+        for file_absolute_path in self.files_names_absolute_list:
+            folder_path = os.path.dirname(file_absolute_path)
+            if folder_path != "" and folder_path not in folders:
+                folders.append(folder_path)
+        return folders
+
     def change_global_attachment_list(self):
         GlobalSetting.ATTACHMENT_FILES_LIST = self.files_names_list
         GlobalSetting.ATTACHMENT_FILES_ABSOLUTE_PATH_LIST = self.files_names_absolute_list
+        GlobalSetting.ATTACHMENT_SEARCH_FOLDERS = self.get_attachment_search_folders()
         GlobalSetting.ATTACHMENT_FILES_CHECKING_LIST = []
         for i in range(len(self.files_names_list)):
             if self.files_checked_list[i]:
@@ -242,6 +265,7 @@ class AttachmentSelectionSetting(GlobalSetting):
         self.expert_mode_widget.update_total_size_readable_signal.connect(
             self.attachment_total_size_value_label.update_total_size_readable_expert_mode)
         self.expert_mode_widget.is_there_old_paths_signal.connect(self.update_is_there_old_files)
+        self.folder_watcher.folder_changed_signal.connect(self.refresh_files_from_current_folder)
 
     def expert_mode_toggled(self, on):
         if on:

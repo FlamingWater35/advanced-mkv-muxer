@@ -4,7 +4,16 @@ from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import QStyledItemDelegate, QComboBox
 
 # noinspection SpellCheckingInspection
-from packages.Tabs.GlobalSetting import GlobalSetting
+from packages.Tabs.GlobalSetting import (
+    GlobalSetting,
+    TRACK_SECTION_FORMAT,
+    TRACK_SECTION_LANGUAGE,
+    TRACK_SECTION_ORDER,
+    TRACK_SECTION_TRACK_ID,
+    TRACK_SECTION_TRACK_NAME,
+    get_track_id_from_menu_entry,
+    is_track_menu_section,
+)
 
 
 class TracksCheckableComboBox(QComboBox):
@@ -34,6 +43,8 @@ class TracksCheckableComboBox(QComboBox):
         self.tracks_id = []
         self.tracks_language = []
         self.tracks_name = []
+        self.tracks_order = []
+        self.tracks_format = []
 
         # Use custom delegate
         self.setItemDelegate(TracksCheckableComboBox.Delegate())
@@ -97,18 +108,15 @@ class TracksCheckableComboBox(QComboBox):
                             if item.checkState() == Qt.CheckState.Checked or item.checkState() == Qt.CheckState.PartiallyChecked:
                                 for i in range(0, self.model().rowCount()):
                                     item = self.model().item(i)
-                                    if item.text().find("---Track Id---") == -1 and item.text().find(
-                                            "---Language---") == -1 and item.text().find("---Track Name---") == -1:
+                                    if not is_track_menu_section(item.text()):
                                         item.setCheckState(Qt.CheckState.Unchecked)
                             else:
                                 for i in range(0, self.model().rowCount()):
                                     item = self.model().item(i)
-                                    if item.text().find("---Track Id---") == -1 and item.text().find(
-                                            "---Language---") == -1 and item.text().find("---Track Name---") == -1:
+                                    if not is_track_menu_section(item.text()):
                                         item.setCheckState(Qt.CheckState.Checked)
                             return True
-                        elif item.text().find("---Track Id---") == -1 and item.text().find(
-                                "---Language---") == -1 and item.text().find("---Track Name---") == -1:
+                        elif not is_track_menu_section(item.text()):
                             if item.checkState() == Qt.CheckState.Checked:
                                 item.setCheckState(Qt.CheckState.Unchecked)
                                 self.update_state_of_select_all_check()
@@ -144,68 +152,62 @@ class TracksCheckableComboBox(QComboBox):
         self.closeOnLineEditClick = False
 
     def updateText(self):
-        count_tracks_id = 0
-        count_tracks_languages = 0
-        count_tracks_names = 0
-        tracks = []
-        tracks_id_text = []
-        tracks_name_text = []
-        tracks_languages_text = []
-        text = ""
-        current_tracks = "None"
+        # Every section keeps its own selection list; the summary text and the
+        # tooltip name them one by one.
+        checked_by_section = {
+            TRACK_SECTION_ORDER: [],
+            TRACK_SECTION_TRACK_ID: [],
+            TRACK_SECTION_LANGUAGE: [],
+            TRACK_SECTION_FORMAT: [],
+            TRACK_SECTION_TRACK_NAME: [],
+        }
+        section_summary = {
+            TRACK_SECTION_ORDER: "Orders",
+            TRACK_SECTION_TRACK_ID: "Track Ids",
+            TRACK_SECTION_LANGUAGE: "Languages",
+            TRACK_SECTION_FORMAT: "Formats",
+            TRACK_SECTION_TRACK_NAME: "Track Names",
+        }
+        current_section = ""
         for i in range(self.model().rowCount()):
-            if self.model().item(i).text() == "---Track Id---":
-                current_tracks = "id"
-            elif self.model().item(i).text() == "---Language---":
-                current_tracks = "lang"
-            elif self.model().item(i).text() == "---Track Name---":
-                current_tracks = "name"
-            if self.model().item(i).checkState() == Qt.CheckState.Checked:
-                if current_tracks == "id":
-                    count_tracks_id += 1
-                    tracks.append(self.model().item(i).text())
-                    tracks_id_text.append(self.model().item(i).text().split(" ")[1])
-                elif current_tracks == "lang":
-                    count_tracks_languages += 1
-                    tracks_languages_text.append(self.model().item(i).text())
-                elif current_tracks == "name":
-                    count_tracks_names += 1
-                    tracks_name_text.append(self.model().item(i).text())
-        self.tracks_id = tracks_id_text
-        self.tracks_language = tracks_languages_text
-        self.tracks_name = tracks_name_text
-        if count_tracks_id > 0:
-            tracks_id_text = "Track Ids: [" + ", ".join(tracks_id_text) + "]"
-            text = tracks_id_text
-        if count_tracks_languages > 0:
-            tracks_languages_text = "Languages: [" + ", ".join(tracks_languages_text) + "]"
-            if text != "":
-                text = text + "," + tracks_languages_text
+            item_text = self.model().item(i).text()
+            if is_track_menu_section(item_text):
+                current_section = item_text
+                continue
+            if current_section not in checked_by_section:
+                continue
+            if self.model().item(i).checkState() != Qt.CheckState.Checked:
+                continue
+            if current_section == TRACK_SECTION_TRACK_ID:
+                track_id = get_track_id_from_menu_entry(item_text)
+                if track_id is None:
+                    continue
+                checked_by_section[current_section].append(track_id)
             else:
-                text = tracks_languages_text
-        if count_tracks_names > 0:
-            tracks_name_text = "Track Names: [" + ", ".join(tracks_name_text) + "]"
-            if text != "":
-                text = text + "," + tracks_name_text
-            else:
-                text = tracks_name_text
+                checked_by_section[current_section].append(item_text)
 
+        self.tracks_order = checked_by_section[TRACK_SECTION_ORDER]
+        self.tracks_id = checked_by_section[TRACK_SECTION_TRACK_ID]
+        self.tracks_language = checked_by_section[TRACK_SECTION_LANGUAGE]
+        self.tracks_format = checked_by_section[TRACK_SECTION_FORMAT]
+        self.tracks_name = checked_by_section[TRACK_SECTION_TRACK_NAME]
+
+        text_parts = []
+        hint_parts = []
+        for section in (TRACK_SECTION_ORDER, TRACK_SECTION_TRACK_ID, TRACK_SECTION_LANGUAGE,
+                        TRACK_SECTION_FORMAT, TRACK_SECTION_TRACK_NAME):
+            values = checked_by_section[section]
+            if len(values) == 0:
+                continue
+            text_parts.append(section_summary[section] + ": [" + ", ".join(values) + "]")
+            hint_parts.append("-" + text_parts[-1])
+
+        text = ",".join(text_parts)
         # Compute elided text (with "...")
         self.current_text = text
         if text != "":
             self.update_shown_text()
-            if count_tracks_id > 0:
-                self.hint = "-" + tracks_id_text
-                if count_tracks_languages > 0:
-                    self.hint = self.hint + "<br>" + "-" + tracks_languages_text
-                if count_tracks_names > 0:
-                    self.hint = self.hint + "<br>" + "-" + tracks_name_text
-            elif count_tracks_languages > 0:
-                self.hint = tracks_languages_text
-                if count_tracks_names > 0:
-                    self.hint = self.hint + "<br>" + "-" + tracks_name_text
-            elif count_tracks_names:
-                self.hint = tracks_name_text
+            self.hint = "<br>".join(hint_parts)
         else:
             italic_font = self.lineEdit().font()
             italic_font.setItalic(True)
@@ -221,8 +223,7 @@ class TracksCheckableComboBox(QComboBox):
             item.setData(text)
         else:
             item.setData(data)
-        if text.find("---Track Id---") == -1 and text.find("---Language---") == -1 and text.find(
-                "---Track Name---") == -1 and text.find("All Tracks") == -1:
+        if not is_track_menu_section(text) and text.find("All Tracks") == -1:
             item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
             item.setData(Qt.CheckState.Unchecked, Qt.CheckStateRole)
             item.setData(text, Qt.ItemDataRole.ToolTipRole)

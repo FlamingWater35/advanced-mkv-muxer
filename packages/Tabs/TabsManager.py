@@ -84,6 +84,14 @@ class TabsManager(QTabWidget):
         self.mux_setting_tab.update_task_bar_clear_signal.connect(self.update_task_bar_clear_signal.emit)
         self.currentChanged.connect(self.current_tab_changed)
         self.theme_button.dark_mode_updated_signal.connect(self.update_theme_mode_state)
+        self.video_tab.include_subfolders_changed_signal.connect(self.refresh_all_files_lists)
+
+    def refresh_all_files_lists(self):
+        """Re-scan every source folder after the subfolders option changed."""
+        self.subtitle_tab.refresh_files_from_current_folder()
+        self.audio_tab.refresh_files_from_current_folder()
+        self.chapter_tab.refresh_files_from_current_folder()
+        self.attachment_tab.refresh_files_from_current_folder()
 
     def start_muxing(self):
         self.task_bar_start_muxing_signal.emit()

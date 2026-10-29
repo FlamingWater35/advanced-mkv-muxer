@@ -16,6 +16,10 @@ def reset_options(dark_mode=False):
     Options.Dark_Mode = dark_mode
     Options.Attachment_Expert_Mode_Info_Message_Show = True
     Options.Choose_Preset_On_Startup = False
+    Options.Default_Subtitle_Set_Default = False
+    Options.Default_Subtitle_Set_Forced = False
+    Options.Default_Audio_Set_Default = False
+    Options.Default_Audio_Set_Forced = False
 
 
 def write_settings(data, path=None):

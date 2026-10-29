@@ -1,6 +1,7 @@
 from PySide6.QtGui import Qt
 from PySide6.QtWidgets import QCheckBox
 
+from packages.Startup.Options import Options, save_options
 from packages.Tabs.GlobalSetting import GlobalSetting
 
 
@@ -9,19 +10,30 @@ class SubtitleSetForcedCheckBox(QCheckBox):
         super().__init__()
         self.tab_index = tab_index
         self.hint_when_enabled = ""
+        self.is_updating = False
         self.setText("Set Forced")
         self.stateChanged.connect(self.change_global_subtitle_set_forced)
 
     def change_global_subtitle_set_forced(self):
-        GlobalSetting.SUBTITLE_SET_FORCED[self.tab_index] = self.checkState() == Qt.CheckState.Checked
-        if self.checkState() == Qt.CheckState.Checked:
-            for i in GlobalSetting.SUBTITLE_SET_FORCED.keys():
+        # Several subtitle tracks may carry the forced flag (#127); only the
+        # "Make this subtitle default and forced" option picks one track.
+        is_checked = self.checkState() == Qt.CheckState.Checked
+        GlobalSetting.SUBTITLE_SET_FORCED[self.tab_index] = is_checked
+        if not self.is_updating and Options.Default_Subtitle_Set_Forced != is_checked:
+            # Remember the tick so the next launch starts with it (#41).
+            Options.Default_Subtitle_Set_Forced = is_checked
+            save_options()
 
-                if i != self.tab_index:
-                    GlobalSetting.SUBTITLE_SET_FORCED[i] = False
+    def set_checked_silently(self, is_checked: bool):
+        """Change the tick without treating it as a user preference (#41)."""
+        self.is_updating = True
+        try:
+            self.setChecked(is_checked)
+        finally:
+            self.is_updating = False
 
     def update_check_state(self):
-        self.setChecked(bool(GlobalSetting.SUBTITLE_SET_FORCED[self.tab_index]))
+        self.set_checked_silently(bool(GlobalSetting.SUBTITLE_SET_FORCED[self.tab_index]))
         self.setDisabled(bool(GlobalSetting.SUBTITLE_SET_FORCED_DISABLED))
 
         if self.isEnabled():

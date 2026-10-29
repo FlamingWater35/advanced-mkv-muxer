@@ -122,6 +122,11 @@ class AudioTabManager(GlobalSetting):
     def set_preset_options(self):
         for audio_tab in self.audio_tabs:
             audio_tab.set_preset_options()
+
+    def refresh_files_from_current_folder(self):
+        for audio_tab in self.audio_tabs:
+            audio_tab.refresh_files_from_current_folder()
+
     def update_theme_mode_state(self):
         self.audio_tab_comboBox.update_theme_mode_state()
         for audio_tab in self.audio_tabs:

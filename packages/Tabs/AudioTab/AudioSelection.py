@@ -16,6 +16,7 @@ from packages.Tabs.AudioTab.Widgets.AudioSourceButton import AudioSourceButton
 from packages.Tabs.AudioTab.Widgets.AudioSourceLineEdit import AudioSourceLineEdit
 from packages.Tabs.AudioTab.Widgets.AudioTrackNameLineEdit import AudioTrackNameLineEdit
 from packages.Tabs.AudioTab.Widgets.MatchAudioLayout import MatchAudioLayout
+from packages.Widgets.FolderWatcher import FolderWatcher
 from packages.Widgets.RefreshFilesButton import RefreshFilesButton
 from packages.Tabs.GlobalSetting import *
 from packages.Widgets.InvalidPathDialog import *
@@ -83,6 +84,7 @@ class AudioSelectionSetting(QGroupBox):
         self.audio_match_layout.audio_table.drop_folder_and_files_signal.connect(
             self.update_files_with_drag_and_drop)
         self.audio_clear_button.clear_files_signal.connect(self.clear_files)
+        self.folder_watcher.folder_changed_signal.connect(self.refresh_files_from_current_folder)
 
     def create_global_properties(self):
         GlobalSetting.AUDIO_FILES_LIST[self.tab_index] = []
@@ -90,8 +92,8 @@ class AudioSelectionSetting(QGroupBox):
         GlobalSetting.AUDIO_TRACK_NAME[self.tab_index] = ""
         GlobalSetting.AUDIO_DELAY[self.tab_index] = 0.0
         GlobalSetting.AUDIO_TAB_ENABLED[self.tab_index] = False
-        GlobalSetting.AUDIO_SET_DEFAULT[self.tab_index] = False
-        GlobalSetting.AUDIO_SET_FORCED[self.tab_index] = False
+        GlobalSetting.AUDIO_SET_DEFAULT[self.tab_index] = Options.Default_Audio_Set_Default
+        GlobalSetting.AUDIO_SET_FORCED[self.tab_index] = Options.Default_Audio_Set_Forced
         GlobalSetting.AUDIO_SET_ORDER[self.tab_index] = -1
         GlobalSetting.AUDIO_LANGUAGE[self.tab_index] = Options.CurrentPreset.Default_Audio_Language
 
@@ -103,6 +105,7 @@ class AudioSelectionSetting(QGroupBox):
         self.files_names_absolute_list_with_dropped_files = []
         self.current_audio_extensions = Options.CurrentPreset.Default_Audio_Extensions
         self.is_drag_and_drop = False
+        self.folder_watcher = FolderWatcher(parent=self)
 
     def setup_layouts(self):
         self.setup_audio_check_default_forced_layout()
@@ -201,24 +204,20 @@ class AudioSelectionSetting(QGroupBox):
             self.show_audio_files_list()
 
     def get_files_list(self, folder_path):
-        temp_files_names = sort_names_like_windows(names_list=os.listdir(folder_path))
-        temp_files_names_absolute = get_files_names_absolute_list(temp_files_names, folder_path)
-        current_extensions = self.audio_extensions_comboBox.currentData()
-        result = []
-        for i in range(len(temp_files_names)):
-            if os.path.isdir(temp_files_names_absolute[i]):
-                continue
-            if os.path.getsize(temp_files_names_absolute[i]) == 0:
-                continue
-            for j in range(len(current_extensions)):
-                temp_file_extension_start_index = temp_files_names[i].rfind(".")
-                if temp_file_extension_start_index == -1:
-                    continue
-                temp_file_extension = temp_files_names[i][temp_file_extension_start_index + 1:]
-                if temp_file_extension.lower() == current_extensions[j].lower():
-                    result.append(temp_files_names[i])
-                    break
-        return result
+        return get_matching_files_in_folder(
+            folder_path,
+            extensions=self.audio_extensions_comboBox.currentData(),
+            include_subfolders=GlobalSetting.INCLUDE_SUBFOLDERS)
+
+    def refresh_files_from_current_folder(self):
+        """Reload the current folder, e.g. after the subfolders option changed."""
+        if not (self.folder_path and not self.folder_path.isspace() and not self.is_drag_and_drop):
+            return
+        if not GlobalSetting.JOB_QUEUE_EMPTY:
+            return
+        if self.get_files_list(self.folder_path) == self.files_names_list:
+            return
+        self.update_folder_path(self.folder_path)
 
     def show_audio_files_list(self):
         self.update_other_classes_variables()
@@ -239,6 +238,7 @@ class AudioSelectionSetting(QGroupBox):
 
     def clear_files(self):
         self.folder_path = ""
+        self.folder_watcher.clear()
         self.files_names_list = []
         self.files_names_absolute_list = []
         self.audio_refresh_files_button.update_current_path(new_path="")
@@ -268,8 +268,8 @@ class AudioSelectionSetting(QGroupBox):
             self.current_audio_extensions = Options.CurrentPreset.Default_Audio_Extensions
             self.audio_extensions_comboBox.setData(self.current_audio_extensions)
             self.audio_track_name_lineEdit.setText("")
-            self.audio_set_forced_checkBox.setChecked(False)
-            self.audio_set_default_checkBox.setChecked(False)
+            self.audio_set_forced_checkBox.set_checked_silently(False)
+            self.audio_set_default_checkBox.set_checked_silently(False)
             self.is_drag_and_drop = False
             self.audio_source_lineEdit.set_is_drag_and_drop(False)
             self.audio_delay_spin.setValue(0)

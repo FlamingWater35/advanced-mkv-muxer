@@ -4,8 +4,13 @@ from PySide6.QtWidgets import QHeaderView, QTableWidgetItem, QAbstractItemView
 
 from packages.Startup.InitializeScreenResolution import screen_size
 from packages.Tabs.GlobalSetting import GlobalSetting
+from packages.Widgets.MatchingSlotItem import create_matching_file_item
 from packages.Widgets.TableFixedHeader import TableFixedHeaderWidget
 from packages.Widgets.TableWidget import TableWidget
+
+
+def fill_file_item(file_name):
+    return create_matching_file_item(file_name, "Empty slot: no audio will be attached to this row")
 
 
 class AudioMatchingTable(TableFixedHeaderWidget):
@@ -37,8 +42,7 @@ class AudioMatchingTable(TableFixedHeaderWidget):
         self.table.setRowCount(len(files_list))
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         for i in range(len(files_list)):
-            item = QTableWidgetItem(" " + files_list[i])
-            item.setToolTip(files_list[i])
+            item = fill_file_item(files_list[i])
             self.table.setItem(i, 0, item)
             item = QTableWidgetItem(str(i + 1))
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -49,14 +53,17 @@ class AudioMatchingTable(TableFixedHeaderWidget):
         files_list = GlobalSetting.AUDIO_FILES_LIST[self.tab_index]
         self.table.setRowCount(len(files_list))
         for i in range(len(files_list)):
-            if files_list[i] != self.current_files_list[i]:
-                item = QTableWidgetItem(" " + files_list[i])
-                item.setToolTip(files_list[i])
+            # Inserting an empty slot makes the list longer than what was
+            # rendered last time, so an index-only comparison is not enough.
+            if i >= len(self.current_files_list) or files_list[i] != self.current_files_list[i]:
+                item = fill_file_item(files_list[i])
                 self.table.setItem(i, 0, item)
                 item = QTableWidgetItem(str(i + 1))
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setVerticalHeaderItem(i, item)
-                self.current_files_list[i] = files_list[i]
+                if i < len(self.current_files_list):
+                    self.current_files_list[i] = files_list[i]
+        self.current_files_list = files_list[:]
 
     def clear_selection(self):
         self.table.clearSelection()

@@ -5,7 +5,8 @@ from PySide6.QtWidgets import QAbstractItemView, QTableWidgetItem, QHeaderView, 
 
 from packages.Startup.Options import Options
 from packages.Startup.InitializeScreenResolution import screen_size
-from packages.Tabs.GlobalSetting import GlobalSetting, get_readable_filesize
+from packages.Tabs.GlobalSetting import GlobalSetting, get_readable_filesize, is_empty_matching_slot
+from packages.Tabs.MuxSetting.Widgets.JobOutputFiles import get_file_size
 from packages.Tabs.MuxSetting.Widgets.MuxingParams import MuxingParams
 from packages.Tabs.MuxSetting.Widgets.ProgreeBar import ProgressBar
 from packages.Tabs.MuxSetting.Widgets.SingleJobData import SingleJobData
@@ -110,6 +111,7 @@ def set_attachments_setting_for_job(new_job, new_row_id):
 
 class JobQueueTable(TableWidget):
     update_total_progress_signal = Signal(int)
+    update_total_size_change_signal = Signal(int)
     increase_number_of_done_jobs_signal = Signal()
     set_number_of_jobs_signal = Signal(int)
     paused_done_signal = Signal()
@@ -121,6 +123,7 @@ class JobQueueTable(TableWidget):
         super().__init__()
         self.data = []  # type: list[SingleJobData]
         self.total_progress = 0
+        self.total_size_change_bytes = 0
         self.number_of_jobs = 0
         self.number_of_done_jobs = 0
         self.start_muxing_worker = None
@@ -206,6 +209,7 @@ class JobQueueTable(TableWidget):
 
     def set_row_value_size_before_muxing(self, new_job, new_row_id):
         new_job.size_before_muxing = " " + GlobalSetting.VIDEO_FILES_SIZE_LIST[new_row_id]
+        new_job.size_before_muxing_bytes = get_file_size(new_job.video_name_absolute)
         self.setCellWidget(new_row_id, self.column_ids["Size Before"], QLabel(new_job.size_before_muxing))
 
     def set_row_value_size_after_muxing(self, output_video_size_bytes, row_index):
@@ -235,6 +239,9 @@ class JobQueueTable(TableWidget):
         subtitles_count = 0
         for i in GlobalSetting.SUBTITLE_FILES_LIST.keys():
             if len(GlobalSetting.SUBTITLE_FILES_LIST[i]) > new_row_id:
+                if is_empty_matching_slot(GlobalSetting.SUBTITLE_FILES_LIST[i][new_row_id]):
+                    # Deliberately empty slot (#158): no subtitle for this row.
+                    continue
                 new_job.subtitle_found = True
                 new_job.subtitle_name.append(GlobalSetting.SUBTITLE_FILES_LIST[i][new_row_id])
                 new_job.subtitle_name_absolute.append(GlobalSetting.SUBTITLE_FILES_ABSOLUTE_PATH_LIST[i][new_row_id])
@@ -271,6 +278,9 @@ class JobQueueTable(TableWidget):
         audios_count = 0
         for i in GlobalSetting.AUDIO_FILES_LIST.keys():
             if len(GlobalSetting.AUDIO_FILES_LIST[i]) > new_row_id:
+                if is_empty_matching_slot(GlobalSetting.AUDIO_FILES_LIST[i][new_row_id]):
+                    # Deliberately empty slot (#158): no audio for this row.
+                    continue
                 new_job.audio_found = True
                 new_job.audio_name.append(GlobalSetting.AUDIO_FILES_LIST[i][new_row_id])
                 new_job.audio_name_absolute.append(GlobalSetting.AUDIO_FILES_ABSOLUTE_PATH_LIST[i][new_row_id])
@@ -359,7 +369,8 @@ class JobQueueTable(TableWidget):
                 subtitles_default_value_set_default = []
                 subtitles_default_value_set_forced = []
                 for i in GlobalSetting.SUBTITLE_FILES_LIST.keys():
-                    if len(GlobalSetting.SUBTITLE_FILES_LIST[i]) > row_index:
+                    if len(GlobalSetting.SUBTITLE_FILES_LIST[i]) > row_index and \
+                            not is_empty_matching_slot(GlobalSetting.SUBTITLE_FILES_LIST[i][row_index]):
                         subtitles_default_value_delay_list.append(GlobalSetting.SUBTITLE_DELAY[i])
                         subtitles_default_value_language.append(GlobalSetting.SUBTITLE_LANGUAGE[i])
                         subtitles_default_value_track_name.append(GlobalSetting.SUBTITLE_TRACK_NAME[i])
@@ -392,8 +403,8 @@ class JobQueueTable(TableWidget):
                     current_cell_widget = self.cellWidget(row_index, self.column_ids["Subtitle"])
                     if len(subtitle_info_dialog.current_subtitle_delay) == 1:
                         current_cell_widget.update_tool_tip(tool_tip=generate_tool_tip_for_subtitle_file(
-                            subtitle_full_path=GlobalSetting.SUBTITLE_FILES_ABSOLUTE_PATH_LIST[0][row_index],
-                            subtitle_name=GlobalSetting.SUBTITLE_FILES_LIST[0][row_index],
+                            subtitle_full_path=self.data[row_index].subtitle_name_absolute[0],
+                            subtitle_name=self.data[row_index].subtitle_name[0],
                             subtitle_delay=self.data[row_index].subtitle_delay[0],
                             subtitle_language=self.data[row_index].subtitle_language[0],
                             subtitle_track_name=self.data[row_index].subtitle_track_name[0],
@@ -413,7 +424,8 @@ class JobQueueTable(TableWidget):
                 audios_default_value_set_default = []
                 audios_default_value_set_forced = []
                 for i in GlobalSetting.AUDIO_FILES_LIST.keys():
-                    if len(GlobalSetting.AUDIO_FILES_LIST[i]) > row_index:
+                    if len(GlobalSetting.AUDIO_FILES_LIST[i]) > row_index and \
+                            not is_empty_matching_slot(GlobalSetting.AUDIO_FILES_LIST[i][row_index]):
                         audios_default_value_delay_list.append(GlobalSetting.AUDIO_DELAY[i])
                         audios_default_value_language.append(GlobalSetting.AUDIO_LANGUAGE[i])
                         audios_default_value_track_name.append(GlobalSetting.AUDIO_TRACK_NAME[i])
@@ -446,8 +458,8 @@ class JobQueueTable(TableWidget):
                     current_cell_widget = self.cellWidget(row_index, self.column_ids["Audio"])
                     if len(audio_info_dialog.current_audio_delay) == 1:
                         current_cell_widget.update_tool_tip(tool_tip=generate_tool_tip_for_audio_file(
-                            audio_full_path=GlobalSetting.AUDIO_FILES_ABSOLUTE_PATH_LIST[0][row_index],
-                            audio_name=GlobalSetting.AUDIO_FILES_LIST[0][row_index],
+                            audio_full_path=self.data[row_index].audio_name_absolute[0],
+                            audio_name=self.data[row_index].audio_name[0],
                             audio_delay=self.data[row_index].audio_delay[0],
                             audio_language=self.data[row_index].audio_language[0],
                             audio_track_name=self.data[row_index].audio_track_name[0],
@@ -511,6 +523,8 @@ class JobQueueTable(TableWidget):
         for i in range(len(GlobalSetting.VIDEO_FILES_LIST)):
             new_row_id = i
             new_job = SingleJobData()
+            # 1 based queue position, exposed to the output name pattern (#111).
+            new_job.queue_index = new_row_id + 1
             self.set_row_value_id(new_row_id)
             self.set_row_value_name(new_job, new_row_id)
             self.set_row_value_audio(new_job, new_row_id)
@@ -594,6 +608,8 @@ class JobQueueTable(TableWidget):
         self.data = []  # type: list[SingleJobData]
         self.setRowCount(0)
         self.total_progress = 0
+        self.total_size_change_bytes = 0
+        self.update_total_size_change_signal.emit(0)
         self.number_of_jobs = 0
         self.number_of_done_jobs = 0
         GlobalSetting.JOB_QUEUE_EMPTY = True
@@ -644,6 +660,12 @@ class JobQueueTable(TableWidget):
         self.increase_number_of_done_jobs_signal.emit()
         self.set_job_status_ok(row_index=job_index)
         self.set_row_value_size_after_muxing(output_size, job_index)
+        self.data[job_index].size_after_muxing_bytes = output_size
+        self.add_total_size_change(output_size - self.data[job_index].size_before_muxing_bytes)
+
+    def add_total_size_change(self, change_bytes):
+        self.total_size_change_bytes += change_bytes
+        self.update_total_size_change_signal.emit(self.total_size_change_bytes)
 
     def job_error_occurred(self, job_index, output_size):
         if not self.is_job_index_valid(job_index):

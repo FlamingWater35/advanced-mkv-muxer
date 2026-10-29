@@ -2,8 +2,9 @@ from PySide6.QtCore import Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QVBoxLayout
 
-from packages.Tabs.GlobalSetting import GlobalSetting
+from packages.Tabs.GlobalSetting import GlobalSetting, insert_empty_matching_slot
 from packages.Tabs.SubtitleTab.Widgets.DeleteSubtitleButton import DeleteSubtitleButton
+from packages.Tabs.SubtitleTab.Widgets.InsertEmptySubtitleButton import InsertEmptySubtitleButton
 from packages.Tabs.SubtitleTab.Widgets.MoveSubtitleBottomButton import MoveSubtitleBottomButton
 from packages.Tabs.SubtitleTab.Widgets.MoveSubtitleDownButton import MoveSubtitleDownButton
 from packages.Tabs.SubtitleTab.Widgets.MoveSubtitleToButton import MoveSubtitleToButton
@@ -26,6 +27,7 @@ class MatchSubtitleToolsLayout(QVBoxLayout):
         self.move_subtitle_bottom_button = MoveSubtitleBottomButton()
         self.move_subtitle_to_button = MoveSubtitleToButton()
         self.delete_subtitle_button = DeleteSubtitleButton()
+        self.insert_empty_subtitle_button = InsertEmptySubtitleButton()
         self.setup_shortcuts()
         self.setup_layout()
         self.connect_signals()
@@ -54,6 +56,8 @@ class MatchSubtitleToolsLayout(QVBoxLayout):
         self.delete_subtitle_button.delete_happened_signal.connect(
             self.update_global_subtitle_files_list_order_deleting)
         self.delete_subtitle_button.selected_row_after_delete.connect(self.change_selected_subtitle_row)
+        self.insert_empty_subtitle_button.insert_empty_slot_signal.connect(
+            self.update_global_subtitle_files_list_insert_empty_slot)
 
     def setup_layout(self):
         self.addStretch()
@@ -66,6 +70,8 @@ class MatchSubtitleToolsLayout(QVBoxLayout):
         self.addWidget(self.move_subtitle_bottom_button)
         self.addSpacing(10)
         self.addWidget(self.move_subtitle_down_button)
+        self.addSpacing(10)
+        self.addWidget(self.insert_empty_subtitle_button)
         self.addSpacing(10)
         self.addWidget(self.delete_subtitle_button)
         self.addStretch()
@@ -84,6 +90,8 @@ class MatchSubtitleToolsLayout(QVBoxLayout):
         self.move_subtitle_to_button.max_index = max_index
         self.delete_subtitle_button.current_index = selected_row
         self.delete_subtitle_button.max_index = max_index
+        self.insert_empty_subtitle_button.current_index = selected_row
+        self.insert_empty_subtitle_button.max_index = max_index
 
     # noinspection PyAttributeOutsideInit
     def setup_shortcuts(self):
@@ -119,6 +127,7 @@ class MatchSubtitleToolsLayout(QVBoxLayout):
         self.move_subtitle_bottom_button.setEnabled(False)
         self.move_subtitle_to_button.setEnabled(False)
         self.delete_subtitle_button.setEnabled(False)
+        self.insert_empty_subtitle_button.setEnabled(False)
 
         self.move_subtitle_up_shortcut.setEnabled(False)
         self.move_subtitle_top_shortcut.setEnabled(False)
@@ -134,6 +143,7 @@ class MatchSubtitleToolsLayout(QVBoxLayout):
         self.move_subtitle_bottom_button.setEnabled(True)
         self.move_subtitle_to_button.setEnabled(True)
         self.delete_subtitle_button.setEnabled(True)
+        self.insert_empty_subtitle_button.setEnabled(True)
 
         self.move_subtitle_up_shortcut.setEnabled(True)
         self.move_subtitle_top_shortcut.setEnabled(True)
@@ -211,3 +221,12 @@ class MatchSubtitleToolsLayout(QVBoxLayout):
         del GlobalSetting.SUBTITLE_FILES_LIST[self.tab_index][index_to_delete]
         del GlobalSetting.SUBTITLE_FILES_ABSOLUTE_PATH_LIST[self.tab_index][index_to_delete]
         self.refresh_subtitle_table()
+
+    def update_global_subtitle_files_list_insert_empty_slot(self, index):
+        """Insert an empty slot so later subtitle files keep their own row."""
+        insert_empty_matching_slot(
+            GlobalSetting.SUBTITLE_FILES_LIST[self.tab_index],
+            GlobalSetting.SUBTITLE_FILES_ABSOLUTE_PATH_LIST[self.tab_index],
+            index)
+        self.refresh_subtitle_table()
+        self.selected_subtitle_row_signal.emit(index)

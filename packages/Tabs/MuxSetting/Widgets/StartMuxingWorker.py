@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 import traceback
@@ -17,6 +18,7 @@ from packages.Tabs.MuxSetting.Widgets.JobOutputFiles import (
     get_output_size,
     record_failed_job_output,
 )
+from packages.Tabs.MuxSetting.Widgets.JobChangeDetection import job_has_nothing_to_do
 from packages.Tabs.MuxSetting.Widgets.MuxingParams import MuxingParams
 from packages.Tabs.MuxSetting.Widgets.ReadFromMkvmergeLogWorker import ReadFromMkvmergeLogWorker
 from packages.Tabs.MuxSetting.Widgets.ReadFromMkvpropeditLogWorker import ReadFromMkvpropeditLogWorker
@@ -127,6 +129,8 @@ class StartMuxingWorker(QObject):
     # -- queue ------------------------------------------------------------
 
     def run(self):
+        # Names registered by the output name pattern belong to one run (#111).
+        GlobalSetting.MUX_SETTING_USED_OUTPUT_NAMES = set()
         try:
             self.start_worker_threads()
             self.next_job()
@@ -156,6 +160,9 @@ class StartMuxingWorker(QObject):
 
         job = self.data[self.current_job]
         if not job.done or (job.error_occurred and job.muxing_message.find("There is not enough space") != -1):
+            if job_has_nothing_to_do(job):
+                self.skip_job_without_changes(job)
+                return
             GetJsonForMkvmergeJob(job)
             if GlobalSetting.VIDEO_SOURCE_MKV_ONLY:
                 GetJsonForMkvpropeditJob(job)
@@ -179,6 +186,21 @@ class StartMuxingWorker(QObject):
             self.next_job()
 
     # -- muxing -----------------------------------------------------------
+
+    def skip_job_without_changes(self, job: SingleJobData):
+        """Mark a job that would be rewritten identically as done (#145).
+
+        Nothing is started, so the file on disk is kept untouched and the
+        queue moves on immediately.
+        """
+        job.done = True
+        job.muxing_message = "Nothing to change, the job was skipped"
+        logging.info("Skipped (nothing to change): %s", job.video_name)
+        # The status cell is created by job_started_signal, and the success
+        # handler expects it to exist.
+        self.job_started_signal.emit(self.current_job)
+        self.job_succeeded_signal.emit(self.current_job, job.size_before_muxing_bytes)
+        self.next_job()
 
     # noinspection PyAttributeOutsideInit
     def start_mkvpropedit_muxing(self):

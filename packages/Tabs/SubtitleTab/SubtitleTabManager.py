@@ -119,6 +119,10 @@ class SubtitleTabManager(GlobalSetting):
         for subtitle_tab in self.subtitle_tabs:
             subtitle_tab.set_preset_options()
 
+    def refresh_files_from_current_folder(self):
+        for subtitle_tab in self.subtitle_tabs:
+            subtitle_tab.refresh_files_from_current_folder()
+
     def update_theme_mode_state(self):
         self.subtitle_tab_comboBox.update_theme_mode_state()
         for subtitle_tab in self.subtitle_tabs:

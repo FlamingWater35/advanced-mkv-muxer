@@ -27,6 +27,12 @@ class Options(QWidget):
     Dark_Mode = False
     Attachment_Expert_Mode_Info_Message_Show = True
     Choose_Preset_On_Startup = False
+    # Remembered "Set Default"/"Set Forced" ticks of the subtitle and audio
+    # tabs so the user does not have to re-tick them on every launch (#41).
+    Default_Subtitle_Set_Default = False
+    Default_Subtitle_Set_Forced = False
+    Default_Audio_Set_Default = False
+    Default_Audio_Set_Forced = False
 
 
 def save_options():
@@ -60,7 +66,11 @@ def save_options():
         "FavoritePresetId": Options.FavoritePresetId,
         "Dark_Mode": Options.Dark_Mode,
         "Attachment_Expert_Mode_Info_Message_Show": Options.Attachment_Expert_Mode_Info_Message_Show,
-        "Choose_Preset_On_Startup": Options.Choose_Preset_On_Startup
+        "Choose_Preset_On_Startup": Options.Choose_Preset_On_Startup,
+        "Default_Subtitle_Set_Default": Options.Default_Subtitle_Set_Default,
+        "Default_Subtitle_Set_Forced": Options.Default_Subtitle_Set_Forced,
+        "Default_Audio_Set_Default": Options.Default_Audio_Set_Default,
+        "Default_Audio_Set_Forced": Options.Default_Audio_Set_Forced
     }
     options_file_path = Path(SettingJsonInfoFilePath)
     with open(options_file_path, "w+", encoding="UTF-8") as option_file:
@@ -138,6 +148,18 @@ def read_option_file(option_file):
                                                                                   default_value=True)
             Options.Choose_Preset_On_Startup = get_data_from_json(json_data=data,
                                                                   attribute="Choose_Preset_On_Startup",
+                                                                  default_value=False)
+            Options.Default_Subtitle_Set_Default = get_data_from_json(json_data=data,
+                                                                      attribute="Default_Subtitle_Set_Default",
+                                                                      default_value=False)
+            Options.Default_Subtitle_Set_Forced = get_data_from_json(json_data=data,
+                                                                     attribute="Default_Subtitle_Set_Forced",
+                                                                     default_value=False)
+            Options.Default_Audio_Set_Default = get_data_from_json(json_data=data,
+                                                                   attribute="Default_Audio_Set_Default",
+                                                                   default_value=False)
+            Options.Default_Audio_Set_Forced = get_data_from_json(json_data=data,
+                                                                  attribute="Default_Audio_Set_Forced",
                                                                   default_value=False)
     if not theme_configured:
         Options.Dark_Mode = detect_system_dark_mode()

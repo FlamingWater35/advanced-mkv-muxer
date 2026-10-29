@@ -17,6 +17,7 @@ class VideoTable(TableWidget):
     update_checked_video_signal = Signal(int)
     move_video_to_down_signal = Signal(int)
     move_video_to_up_signal = Signal(int)
+    open_video_file_signal = Signal(int)
 
     def __init__(self):
         super().__init__()
@@ -49,6 +50,7 @@ class VideoTable(TableWidget):
     def connect_signals(self):
         self.itemChanged.connect(self.update_checked_videos_state)
         self.itemClicked.connect(self.update_selected_row)
+        self.cellDoubleClicked.connect(self.cell_double_clicked)
         if GlobalSetting.JOB_QUEUE_EMPTY:
             self.move_row_up_shortcut.activated.connect(self.move_row_up)
             self.move_row_down_shortcut.activated.connect(self.move_row_down)
@@ -182,6 +184,17 @@ class VideoTable(TableWidget):
     def update_selected_row(self, item):
         row_index = item.row()
         self.selectRow(row_index)
+
+    def cell_double_clicked(self, row_index, column_index):
+        # Only the name column; the check box in it must keep toggling.
+        if column_index == self.column_ids["Name"] and row_index >= 0:
+            self.open_video_file_signal.emit(row_index)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.currentRow() >= 0:
+            self.open_video_file_signal.emit(self.currentRow())
+            return
+        super().keyPressEvent(event)
 
     def disable_selection(self):
         for i in reversed(range(self.rowCount())):

@@ -7,10 +7,12 @@ from packages.Startup.Options import Options
 from packages.Startup.SetupThems import get_dark_palette, get_light_palette
 from packages.Tabs.GlobalSetting import *
 from packages.Tabs.SubtitleTab.Widgets.MatchSubtitleLayout import MatchSubtitleLayout
+from packages.Tabs.SubtitleTab.Widgets.MatchLanguageByFileNameCheckBox import MatchLanguageByFileNameCheckBox
 from packages.Tabs.SubtitleTab.Widgets.SubtitleClearButton import SubtitleClearButton
 from packages.Tabs.SubtitleTab.Widgets.SubtitleDelayDoubleSpinBox import SubtitleDelayDoubleSpinBox
 from packages.Tabs.SubtitleTab.Widgets.SubtitleExtensionsCheckableComboBox import SubtitleExtensionsCheckableComboBox
 from packages.Tabs.SubtitleTab.Widgets.SubtitleLanguageComboBox import SubtitleLanguageComboBox
+from packages.Tabs.SubtitleTab.Widgets.SubtitleLanguageDetection import file_name_matches_language
 from packages.Tabs.SubtitleTab.Widgets.SubtitleMuxOrderWidget import SubtitleMuxOrderWidget
 from packages.Tabs.SubtitleTab.Widgets.SubtitleSetDefaultCheckBox import SubtitleSetDefaultCheckBox
 from packages.Tabs.SubtitleTab.Widgets.SubtitleSetForcedCheckBox import SubtitleSetForcedCheckBox
@@ -18,6 +20,7 @@ from packages.Tabs.SubtitleTab.Widgets.SubtitleSourceButton import SubtitleSourc
 from packages.Tabs.SubtitleTab.Widgets.SubtitleSourceLineEdit import SubtitleSourceLineEdit
 from packages.Tabs.SubtitleTab.Widgets.SubtitleTrackNameLineEdit import SubtitleTrackNameLineEdit
 from packages.Widgets.RefreshFilesButton import RefreshFilesButton
+from packages.Widgets.FolderWatcher import FolderWatcher
 from packages.Widgets.InvalidPathDialog import *
 from packages.Widgets.WarningDialog import WarningDialog
 from packages.Widgets.YesNoDialog import *
@@ -49,6 +52,7 @@ class SubtitleSelectionSetting(QGroupBox):
         self.subtitle_refresh_files_button = RefreshFilesButton()
         self.subtitle_extensions_comboBox = SubtitleExtensionsCheckableComboBox()
         self.subtitle_language_comboBox = SubtitleLanguageComboBox(self.tab_index)
+        self.subtitle_match_language_checkBox = MatchLanguageByFileNameCheckBox(self.tab_index)
         self.subtitle_track_name_lineEdit = SubtitleTrackNameLineEdit(self.tab_index)
         self.subtitle_delay_spin = SubtitleDelayDoubleSpinBox(self.tab_index)
         self.subtitle_set_forced_checkBox = SubtitleSetForcedCheckBox(self.tab_index)
@@ -83,6 +87,10 @@ class SubtitleSelectionSetting(QGroupBox):
         self.subtitle_match_layout.subtitle_table.drop_folder_and_files_signal.connect(
             self.update_files_with_drag_and_drop)
         self.subtitle_clear_button.clear_files_signal.connect(self.clear_files)
+        self.subtitle_match_language_checkBox.match_language_option_changed_signal.connect(
+            self.match_language_option_changed)
+        self.subtitle_language_comboBox.currentTextChanged.connect(self.language_changed)
+        self.folder_watcher.folder_changed_signal.connect(self.refresh_files_from_current_folder)
 
     def create_global_properties(self):
         GlobalSetting.SUBTITLE_FILES_LIST[self.tab_index] = []
@@ -90,10 +98,11 @@ class SubtitleSelectionSetting(QGroupBox):
         GlobalSetting.SUBTITLE_TRACK_NAME[self.tab_index] = ""
         GlobalSetting.SUBTITLE_DELAY[self.tab_index] = 0.0
         GlobalSetting.SUBTITLE_TAB_ENABLED[self.tab_index] = False
-        GlobalSetting.SUBTITLE_SET_DEFAULT[self.tab_index] = False
-        GlobalSetting.SUBTITLE_SET_FORCED[self.tab_index] = False
+        GlobalSetting.SUBTITLE_SET_DEFAULT[self.tab_index] = Options.Default_Subtitle_Set_Default
+        GlobalSetting.SUBTITLE_SET_FORCED[self.tab_index] = Options.Default_Subtitle_Set_Forced
         GlobalSetting.SUBTITLE_SET_ORDER[self.tab_index] = -1
         GlobalSetting.SUBTITLE_LANGUAGE[self.tab_index] = Options.CurrentPreset.Default_Subtitle_Language
+        GlobalSetting.SUBTITLE_MATCH_LANGUAGE_BY_FILE_NAME[self.tab_index] = False
 
     def create_properties(self):
         self.folder_path = ""
@@ -103,6 +112,9 @@ class SubtitleSelectionSetting(QGroupBox):
         self.files_names_absolute_list_with_dropped_files = []
         self.current_subtitle_extensions = Options.CurrentPreset.Default_Subtitle_Extensions
         self.is_drag_and_drop = False
+        self.files_filtered_out_by_language = 0
+        self.last_language_filter_warning_key = None
+        self.folder_watcher = FolderWatcher(parent=self)
 
     def setup_layouts(self):
         self.setup_subtitle_check_default_forced_layout()
@@ -121,6 +133,7 @@ class SubtitleSelectionSetting(QGroupBox):
         self.subtitle_options_layout.addWidget(self.subtitle_extensions_comboBox, 2)
         self.subtitle_options_layout.addWidget(self.subtitle_language_label)
         self.subtitle_options_layout.addWidget(self.subtitle_language_comboBox, 5)
+        self.subtitle_options_layout.addWidget(self.subtitle_match_language_checkBox, 4)
         self.subtitle_options_layout.addWidget(self.subtitle_track_name_lineEdit, 2)
         self.subtitle_options_layout.addWidget(self.subtitle_delay_label)
         self.subtitle_options_layout.addWidget(self.subtitle_delay_spin)
@@ -146,6 +159,8 @@ class SubtitleSelectionSetting(QGroupBox):
             self.subtitle_source_lineEdit.set_text_safe_change(new_path)
             self.update_files_lists(new_path)
             self.show_subtitle_files_list()
+            self.folder_watcher.watch_folder(self.folder_path)
+            self.warn_if_language_filter_hid_everything()
             self.subtitle_refresh_files_button.update_current_path(new_path=new_path)
             self.subtitle_refresh_files_button.setEnabled(True)
         else:
@@ -201,24 +216,59 @@ class SubtitleSelectionSetting(QGroupBox):
             self.show_subtitle_files_list()
 
     def get_files_list(self, folder_path):
-        temp_files_names = sort_names_like_windows(names_list=os.listdir(folder_path))
-        temp_files_names_absolute = get_files_names_absolute_list(temp_files_names, folder_path)
-        current_extensions = self.subtitle_extensions_comboBox.currentData()
-        result = []
-        for i in range(len(temp_files_names)):
-            if os.path.isdir(temp_files_names_absolute[i]):
-                continue
-            if os.path.getsize(temp_files_names_absolute[i]) == 0:
-                continue
-            for j in range(len(current_extensions)):
-                temp_file_extension_start_index = temp_files_names[i].rfind(".")
-                if temp_file_extension_start_index == -1:
-                    continue
-                temp_file_extension = temp_files_names[i][temp_file_extension_start_index + 1:]
-                if temp_file_extension.lower() == current_extensions[j].lower():
-                    result.append(temp_files_names[i])
-                    break
-        return result
+        files_list = get_matching_files_in_folder(
+            folder_path,
+            extensions=self.subtitle_extensions_comboBox.currentData(),
+            include_subfolders=GlobalSetting.INCLUDE_SUBFOLDERS)
+        if not GlobalSetting.SUBTITLE_MATCH_LANGUAGE_BY_FILE_NAME[self.tab_index]:
+            self.files_filtered_out_by_language = 0
+            return files_list
+        current_language = GlobalSetting.SUBTITLE_LANGUAGE[self.tab_index]
+        matching_files = [file_name for file_name in files_list
+                          if file_name_matches_language(file_name, current_language)]
+        self.files_filtered_out_by_language = len(files_list) - len(matching_files)
+        return matching_files
+
+    def match_language_option_changed(self, is_checked):
+        """Reload the folder so the new language rule applies immediately (#55)."""
+        self.files_filtered_out_by_language = 0
+        self.refresh_files_from_current_folder()
+
+    def language_changed(self, new_language):
+        # The language of this tab is half of the rule, so a new language needs
+        # a new scan too, but only when the rule is active.
+        if GlobalSetting.SUBTITLE_MATCH_LANGUAGE_BY_FILE_NAME[self.tab_index]:
+            self.refresh_files_from_current_folder()
+
+    def refresh_files_from_current_folder(self):
+        """Reload the current folder, e.g. after the subfolders option changed."""
+        if not (self.folder_path and not self.folder_path.isspace() and not self.is_drag_and_drop):
+            return
+        if not GlobalSetting.JOB_QUEUE_EMPTY:
+            return
+        if self.get_files_list(self.folder_path) == self.files_names_list:
+            return
+        self.update_folder_path(self.folder_path)
+
+    def warn_if_language_filter_hid_everything(self):
+        """The folder had subtitles, but none of them carry this tab's language."""
+        if not GlobalSetting.SUBTITLE_MATCH_LANGUAGE_BY_FILE_NAME[self.tab_index]:
+            return
+        if len(self.files_names_list) > 0 or self.files_filtered_out_by_language <= 0:
+            return
+        current_language = GlobalSetting.SUBTITLE_LANGUAGE[self.tab_index]
+        warning_key = (self.folder_path, self.files_filtered_out_by_language, current_language)
+        if warning_key == self.last_language_filter_warning_key:
+            return
+        self.last_language_filter_warning_key = warning_key
+        info_message = ("No subtitle file in this folder has \"" + current_language +
+                        "\" in its name, so all " + str(self.files_filtered_out_by_language) +
+                        " file(s) were skipped.\n\n"
+                        "Turn off \"Match Language From File Name\" (or change the language of this tab) "
+                        "to load them.")
+        warning_dialog = WarningDialog(window_title="No Subtitle Matches The Language",
+                                       info_message=info_message, parent=self.window())
+        warning_dialog.execute_wth_no_block()
 
     def show_subtitle_files_list(self):
         self.update_other_classes_variables()
@@ -239,6 +289,7 @@ class SubtitleSelectionSetting(QGroupBox):
 
     def clear_files(self):
         self.folder_path = ""
+        self.folder_watcher.clear()
         self.files_names_list = []
         self.files_names_absolute_list = []
         self.files_names_absolute_list_with_dropped_files = []
@@ -268,8 +319,8 @@ class SubtitleSelectionSetting(QGroupBox):
             self.current_subtitle_extensions = Options.CurrentPreset.Default_Subtitle_Extensions
             self.subtitle_extensions_comboBox.setData(self.current_subtitle_extensions)
             self.subtitle_track_name_lineEdit.setText("")
-            self.subtitle_set_forced_checkBox.setChecked(False)
-            self.subtitle_set_default_checkBox.setChecked(False)
+            self.subtitle_set_forced_checkBox.set_checked_silently(False)
+            self.subtitle_set_default_checkBox.set_checked_silently(False)
             self.is_drag_and_drop = False
             self.subtitle_source_lineEdit.set_is_drag_and_drop(False)
             self.subtitle_delay_spin.setValue(0)

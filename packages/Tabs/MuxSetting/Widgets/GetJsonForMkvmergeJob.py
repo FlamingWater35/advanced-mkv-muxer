@@ -1,6 +1,7 @@
 import json
 import operator
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -9,7 +10,12 @@ from sys import platform
 
 from packages.Startup import GlobalFiles
 from packages.Startup.PreDefined import ISO_639_2_LANGUAGES
-from packages.Tabs.GlobalSetting import GlobalSetting
+from packages.Tabs.GlobalSetting import GlobalSetting, get_track_order_from_menu_entry
+from packages.Tabs.AttachmentTab.Widgets.SubtitleFonts import get_subtitle_font_attachments
+from packages.Tabs.MuxSetting.Widgets.ChapterDelay import get_shifted_chapters_file_path
+from packages.Tabs.MuxSetting.Widgets.OutputNamePattern import apply_output_name_pattern, make_output_name_unique
+from packages.Tabs.MuxSetting.Widgets.JobOutputFiles import get_overwrite_temp_path, create_parent_folder, \
+    get_output_file_path
 from packages.Tabs.MuxSetting.Widgets.SingleJobData import SingleJobData
 from packages.Widgets.SingleAttachmentData import SingleAttachmentData
 from packages.Widgets.SingleTrackData import SingleTrackData
@@ -25,6 +31,39 @@ def add_double_quotation(string):
 
 def add_json_line(string):
     return "\n" + add_double_quotation(string) + ","
+
+
+OUTPUT_OVERRIDE_ARGUMENTS = ("-o", "--output")
+
+
+def split_extra_arguments(text):
+    """Split the user supplied mkvmerge arguments into single arguments (#152).
+
+    posix=False keeps backslashes of Windows paths intact; surrounding quotes
+    are stripped afterwards, so `--title "My Movie"` becomes two arguments.
+    Arguments that would move the output file are dropped, the app tracks the
+    output path itself.
+    """
+    arguments = []
+    for token in shlex.split(str(text or ""), posix=False):
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
+            token = token[1:-1]
+        if token == "":
+            continue
+        arguments.append(token)
+    result = []
+    skip_next = False
+    for argument in arguments:
+        if skip_next:
+            skip_next = False
+            continue
+        if argument in OUTPUT_OVERRIDE_ARGUMENTS:
+            skip_next = True
+            continue
+        if argument.split("=")[0] in OUTPUT_OVERRIDE_ARGUMENTS:
+            continue
+        result.append(argument)
+    return result
 
 
 def delete_trailing_zero_string(string):
@@ -68,6 +107,36 @@ def check_type_of_track_chosen(track):
         return "name", value
 
 
+def normalize_track_id_text(track_id_text):
+    """"02" -> "2": mkvmerge wants plain integers (#141)."""
+    try:
+        return str(int(str(track_id_text)))
+    except ValueError:
+        return str(track_id_text)
+
+
+def resolve_keep_list_by_order(orders, tracks_info):
+    """Map "Order N" entries to the id of the N-th track of this file (#141)."""
+    track_ids = []
+    for order_text in orders:
+        order = get_track_order_from_menu_entry(order_text)
+        if order is None:
+            continue
+        index = order - 1
+        if 0 <= index < len(tracks_info):
+            track_ids.append(tracks_info[index].id)
+    return track_ids
+
+
+def resolve_keep_list_by_format(formats, tracks_info):
+    """Map "---Format---" entries to the ids of the matching tracks (#138)."""
+    track_ids = []
+    for track in tracks_info:
+        if track.codec in formats:
+            track_ids.append(track.id)
+    return track_ids
+
+
 class GetJsonForMkvmergeJob:
     def __init__(self, job: SingleJobData):
         self.job = job
@@ -84,6 +153,10 @@ class GetJsonForMkvmergeJob:
         self.old_audio_append_command = ""
         self.old_subtitle_append_command = ""
         self.discard_old_attachments_command = ""
+        self.discard_old_chapters_command = ""
+        self.generate_chapters_command = ""
+        self.title_command = ""
+        self.discard_tags_command = ""
         self.change_default_forced_subtitle_track_setting_source_video_command = ""
         self.change_default_forced_audio_track_setting_source_video_command = ""
         self.specify_video_track_source_video_command = ""
@@ -104,6 +177,7 @@ class GetJsonForMkvmergeJob:
 
     def setup_commands(self):
         self.generate_info_file()
+        self.setup_output_name_pattern()
         self.setup_video_track_order()
         self.setup_attachments_options()
         self.setup_chapter_options()
@@ -121,8 +195,11 @@ class GetJsonForMkvmergeJob:
         self.make_this_audio_default_forced()
         self.setup_ui_language()
         self.setup_output_video_command()
+        self.setup_title_command()
         self.setup_input_video_command()
         self.setup_video_default_duration_fps_command()
+        self.setup_discard_tags_command()
+        self.setup_extra_arguments_command()
         self.setup_track_order_command()
         self.setup_final_command()
 
@@ -148,6 +225,10 @@ class GetJsonForMkvmergeJob:
                 get_attribute(data=track["properties"], attribute="track_name", default_value="UnNamedTrackBeBo"))
             new_track_info.uid = str(
                 get_attribute(data=track["properties"], attribute="uid", default_value="-1"))
+            new_track_info.codec = str(track.get("codec") or get_attribute(
+                data=track["properties"], attribute="codec", default_value=""))
+            new_track_info.dimensions = str(
+                get_attribute(data=track["properties"], attribute="pixel_dimensions", default_value=""))
             if track["type"] == "audio":
                 self.audios_track_json_info.append(new_track_info)
             elif track["type"] == "subtitles":
@@ -162,14 +243,25 @@ class GetJsonForMkvmergeJob:
             new_attachment_info.size = get_attribute(data=attachment, attribute="size", default_value=0)
             self.attachments_json_info.append(new_attachment_info)
 
+    def get_attachments_to_attach(self):
+        """Attachments of this job plus the fonts its subtitles ask for (#160)."""
+        attachments = list(self.job.attachments_absolute_path)
+        if not GlobalSetting.ATTACHMENT_AUTO_DETECT_FONTS:
+            return attachments
+        for font_file in get_subtitle_font_attachments(self.job):
+            if font_file not in attachments:
+                attachments.append(font_file)
+        return attachments
+
     def setup_attachments_options(self):
         discard_old = self.job.discard_old_attachments
         if discard_old:
             self.discard_old_attachments_command = add_json_line("--no-attachments")
-        if len(self.job.attachments_absolute_path) > 0:
+        attachments_to_attach = self.get_attachments_to_attach()
+        if len(attachments_to_attach) > 0:
             allow_duplicates = self.job.allow_duplicates_attachments
             attachments_list_with_attach_command = []
-            for file_to_attach in self.job.attachments_absolute_path:
+            for file_to_attach in attachments_to_attach:
                 file_name_to_attach = os.path.basename(file_to_attach)
                 if not discard_old and not allow_duplicates:
                     attachment_already_found = False
@@ -187,16 +279,48 @@ class GetJsonForMkvmergeJob:
     def setup_chapter_options(self):
         if GlobalSetting.CHAPTER_ENABLED:
             if self.job.chapter_found:
+                # A delay shifts a copy of the chapter file, the file of the
+                # user is never modified (#111).
+                chapter_file_path = self.job.chapter_name_absolute
+                if int(GlobalSetting.CHAPTER_DELAY_MILLISECONDS) != 0:
+                    shifted_chapter_file_path = get_shifted_chapters_file_path(
+                        self.job, int(GlobalSetting.CHAPTER_DELAY_MILLISECONDS))
+                    if shifted_chapter_file_path != "":
+                        chapter_file_path = shifted_chapter_file_path
                 self.chapter_attach_command = add_json_line("--chapters") + \
                                               add_json_line(
-                                                  check_for_system_backslash_path(self.job.chapter_name_absolute))
-            elif GlobalSetting.CHAPTER_DISCARD_OLD:
-                self.discard_old_attachments_command = add_json_line("--no-chapters")
+                                                  check_for_system_backslash_path(chapter_file_path))
+            if GlobalSetting.CHAPTER_DISCARD_OLD or GlobalSetting.CHAPTER_GENERATE_BY_INTERVAL:
+                # --chapters only adds the new chapter file: mkvmerge still
+                # copies the chapters of the source, so they have to be
+                # dropped explicitly (#128). Generated chapters replace the
+                # source ones for the same reason (#172). This is a separate
+                # command so it cannot overwrite the attachments one (#166).
+                self.discard_old_chapters_command = add_json_line("--no-chapters")
+            if GlobalSetting.CHAPTER_GENERATE_BY_INTERVAL:
+                interval_seconds = max(1, int(GlobalSetting.CHAPTER_GENERATE_INTERVAL_SECONDS))
+                self.generate_chapters_command = add_json_line("--generate-chapters") + \
+                                                 add_json_line("interval:" + str(interval_seconds) + "s")
 
     def setup_video_default_duration_fps_command(self):
         if GlobalSetting.VIDEO_DEFAULT_DURATION_FPS not in ["", "Default"]:
-            self.video_default_duration_fps_command = add_json_line("--default-duration") + add_json_line(
+            self.video_default_duration_fps_command += add_json_line("--default-duration") + add_json_line(
                 "0:" + GlobalSetting.VIDEO_DEFAULT_DURATION_FPS)
+        if GlobalSetting.VIDEO_FIX_BITSTREAM_TIMING_INFO:
+            # Rewrites the timestamps in the bitstream itself; only useful
+            # together with a duration/fps override (#149).
+            self.video_default_duration_fps_command += add_json_line("--fix-bitstream-timing-information") + \
+                                                       add_json_line("0:1")
+
+    def setup_title_command(self):
+        if GlobalSetting.MUX_SETTING_SET_TITLE_TO_FILE_NAME:
+            output_title = os.path.splitext(self.job.video_name)[0]
+            self.title_command = add_json_line("--title") + add_json_line(output_title)
+
+    def setup_discard_tags_command(self):
+        if GlobalSetting.MUX_SETTING_DISCARD_ALL_TAGS:
+            # Per-source-file options; they must stay right before the input.
+            self.discard_tags_command = add_json_line("--no-global-tags") + add_json_line("--no-track-tags")
 
     def setup_video_track_order(self):
         if GlobalSetting.VIDEO_OLD_TRACKS_VIDEOS_REORDER_ACTIVATED:
@@ -557,16 +681,26 @@ class GetJsonForMkvmergeJob:
         if GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_ENABLED:
             if len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_LANGUAGES) == 0 and \
                     len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_IDS) == 0 and \
-                    len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_NAMES) == 0:
+                    len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_NAMES) == 0 and \
+                    len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_ORDERS) == 0 and \
+                    len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_FORMATS) == 0:
                 self.specify_subtitle_track_source_video_command = add_json_line("--no-subtitles")
             else:
-                only_keep_those_subtitle_list = GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_IDS.copy()
+                only_keep_those_subtitle_list = [
+                    normalize_track_id_text(track_id)
+                    for track_id in GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_IDS]
                 for track_name in GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_NAMES:
                     for my_subtitle_track in self.subtitles_track_json_info:
                         if my_subtitle_track.track_name == track_name:
                             only_keep_those_subtitle_list.append(my_subtitle_track.id)
                 for language in GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_LANGUAGES:
                     only_keep_those_subtitle_list.append(ISO_639_2_LANGUAGES[language])
+                only_keep_those_subtitle_list += resolve_keep_list_by_order(
+                    GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_ORDERS,
+                    self.subtitles_track_json_info)
+                only_keep_those_subtitle_list += resolve_keep_list_by_format(
+                    GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_FORMATS,
+                    self.subtitles_track_json_info)
                 only_keep_those_subtitle_list = list(dict.fromkeys(only_keep_those_subtitle_list))
                 if len(only_keep_those_subtitle_list) > 0:
                     self.specify_subtitle_track_source_video_command = add_json_line("--subtitle-tracks")
@@ -598,16 +732,26 @@ class GetJsonForMkvmergeJob:
         if GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_ENABLED:
             if len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_LANGUAGES) == 0 and \
                     len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_IDS) == 0 and \
-                    len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_NAMES) == 0:
+                    len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_NAMES) == 0 and \
+                    len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_ORDERS) == 0 and \
+                    len(GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_FORMATS) == 0:
                 self.specify_audio_track_source_video_command = add_json_line("--no-audio")
             else:
-                only_keep_those_audios_list = GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_IDS.copy()
+                only_keep_those_audios_list = [
+                    normalize_track_id_text(track_id)
+                    for track_id in GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_IDS]
                 for track_name in GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_NAMES:
                     for my_audio_track in self.audios_track_json_info:
                         if my_audio_track.track_name == track_name:
                             only_keep_those_audios_list.append(my_audio_track.id)
                 for audio in GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_LANGUAGES:
                     only_keep_those_audios_list.append(ISO_639_2_LANGUAGES[audio])
+                only_keep_those_audios_list += resolve_keep_list_by_order(
+                    GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_ORDERS,
+                    self.audios_track_json_info)
+                only_keep_those_audios_list += resolve_keep_list_by_format(
+                    GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_FORMATS,
+                    self.audios_track_json_info)
                 only_keep_those_audios_list = list(dict.fromkeys(only_keep_those_audios_list))
                 if len(only_keep_those_audios_list) > 0:
                     self.specify_audio_track_source_video_command = add_json_line("--audio-tracks")
@@ -899,16 +1043,30 @@ class GetJsonForMkvmergeJob:
         self.ui_language_command = "".join(ui_language_commands_list)
 
     # noinspection PyListCreation
+    def setup_output_name_pattern(self):
+        """Resolve the optional output name pattern of the queue (#111)."""
+        self.job.custom_output_name = ""
+        resolution = self.videos_track_json_info[0].dimensions if self.videos_track_json_info else ""
+        video_codec = self.videos_track_json_info[0].codec if self.videos_track_json_info else ""
+        audio_codec = self.audios_track_json_info[0].codec if self.audios_track_json_info else ""
+        self.job.custom_output_name = apply_output_name_pattern(
+            self.job, GlobalSetting.MUX_SETTING_OUTPUT_NAME_PATTERN, resolution=resolution,
+            video_codec=video_codec, audio_codec=audio_codec,
+            keep_crc_placeholder=bool(self.job.is_crc_calculating_required))
+        if self.job.custom_output_name != "":
+            make_output_name_unique(self.job)
+
     def setup_output_video_command(self):
         if GlobalSetting.OVERWRITE_SOURCE_FILES:
-            folder_path = os.path.dirname(self.job.video_name_absolute)
-            output_video_name = Path(change_file_extension_to_mkv_with_random_suffix(self.job.video_name))
-            output_video_name_absolute = os.path.join(folder_path, output_video_name)
+            # The intermediate file can live in a user chosen relay folder
+            # (#143); finalize_muxing_output() moves it back over the source.
+            output_video_name_absolute = get_overwrite_temp_path(self.job)
         else:
-            folder_path = Path(GlobalSetting.DESTINATION_FOLDER_PATH)
-            output_video_name = Path(change_file_extension_to_mkv(self.job.video_name))
-            output_video_name_absolute = os.path.join(folder_path, output_video_name)
+            # get_output_file_path resolves a relative destination like
+            # "converted" against the folder of this source file (#118).
+            output_video_name_absolute = get_output_file_path(self.job)
 
+        create_parent_folder(output_video_name_absolute)
         output_video_commands_list = []
         output_video_commands_list.append(add_json_line("--output"))
         output_video_commands_list.append(add_json_line(check_for_system_backslash_path(output_video_name_absolute)))
@@ -922,13 +1080,25 @@ class GetJsonForMkvmergeJob:
         input_video_commands_list.append(add_json_line(")"))
         self.input_video_command = "".join(input_video_commands_list)
 
+    def setup_extra_arguments_command(self):
+        """User supplied mkvmerge arguments (#152), before the input file so
+        they apply to it like every other global option."""
+        self.extra_arguments_command = ""
+        if GlobalSetting.MUX_SETTING_STOP_AFTER_VIDEO_ENDS:
+            self.extra_arguments_command += add_json_line("--stop-after-video-ends")
+        for argument in split_extra_arguments(GlobalSetting.MUX_SETTING_EXTRA_ARGUMENTS):
+            self.extra_arguments_command += add_json_line(argument)
+
     def setup_final_command(self):
         self.final_command = "["
         self.final_command += "\n"
         self.final_command += self.ui_language_command
         self.final_command += self.output_video_command
+        self.final_command += self.title_command
 
         self.final_command += self.discard_old_attachments_command
+        self.final_command += self.discard_old_chapters_command
+        self.final_command += self.generate_chapters_command
         self.final_command += self.specify_video_track_source_video_command
         self.final_command += self.specify_subtitle_track_source_video_command
         self.final_command += self.specify_audio_track_source_video_command
@@ -939,6 +1109,8 @@ class GetJsonForMkvmergeJob:
         self.final_command += self.change_default_forced_audio_track_setting_source_video_command
 
         self.final_command += self.video_default_duration_fps_command
+        self.final_command += self.discard_tags_command
+        self.final_command += self.extra_arguments_command
         self.final_command += self.input_video_command
         self.final_command += self.new_audio_append_command
         self.final_command += self.new_subtitle_append_command

@@ -179,6 +179,10 @@ class PresetTabWidget(QWidget):
         self.options.Default_Audio_Extensions = self.default_audio_extensions_layout.extensions_checkable_comboBox.currentData()
         self.options.Default_Chapter_Extensions = self.default_chapter_extensions_layout.extensions_checkable_comboBox.currentData()
 
+        # The language combos are editable for search; make sure a half typed
+        # name never reaches the preset.
+        self.default_subtitle_language_layout.languages_comboBox.restore_last_valid_language()
+        self.default_audio_language_layout.languages_comboBox.restore_last_valid_language()
         self.options.Default_Subtitle_Language = self.default_subtitle_language_layout.languages_comboBox.currentText()
         self.options.Default_Audio_Language = self.default_audio_language_layout.languages_comboBox.currentText()
 

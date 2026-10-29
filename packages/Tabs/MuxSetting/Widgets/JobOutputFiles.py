@@ -7,6 +7,7 @@ and size queries can block on network shares.
 """
 
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -104,36 +105,127 @@ def delete_file(file_path):
         return False
 
 
+def get_overwrite_temp_folder(job):
+    """Relay folder for the intermediate file of an overwrite job (#143)."""
+    configured_folder = str(GlobalSetting.OVERWRITE_TEMP_FOLDER_PATH or "").strip()
+    if configured_folder:
+        return configured_folder
+    return os.path.dirname(job.video_name_absolute)
+
+
+def get_overwrite_temp_path(job):
+    return os.path.join(get_overwrite_temp_folder(job),
+                        change_file_extension_to_mkv_with_random_suffix(job.video_name))
+
+
+def are_on_different_devices(first_path, second_path):
+    try:
+        return os.stat(os.path.dirname(first_path)).st_dev != os.stat(os.path.dirname(second_path)).st_dev
+    except OSError:
+        return False
+
+
+def move_file_across_devices(old_path, new_path):
+    """os.rename() cannot cross file systems; copy + delete instead."""
+    try:
+        shutil.move(old_path, new_path)
+        return True
+    except OSError:
+        write_to_log_file(f"Could not move '{old_path}' to '{new_path}'")
+        return False
+
+
 def rename_file(file_name_old_absolute_path, file_name_new_absolute_path,
                 attempts=RENAME_ATTEMPTS, delay=RENAME_RETRY_DELAY):
     """Rename with a short bounded retry, returning True on success.
 
     Windows keeps a file locked for a moment after the muxing tool closes it,
     which is why the retry exists at all. It is deliberately short because the
-    caller runs on a background thread but still gates the job queue.
+    caller runs on a background thread but still gates the job queue. A relay
+    folder on another drive is handled with a real move.
     """
     if os.path.abspath(str(file_name_old_absolute_path)) == os.path.abspath(str(file_name_new_absolute_path)):
         return True
+    if are_on_different_devices(file_name_old_absolute_path, file_name_new_absolute_path):
+        return move_file_across_devices(file_name_old_absolute_path, file_name_new_absolute_path)
     for _ in range(attempts):
         try:
             os.rename(file_name_old_absolute_path, file_name_new_absolute_path)
             return True
         except OSError:
             time.sleep(delay)
+    if os.path.exists(file_name_old_absolute_path):
+        # Last resort for a cross-device rename that was not detected above.
+        return move_file_across_devices(file_name_old_absolute_path, file_name_new_absolute_path)
     write_to_log_file(
         f"Could not rename '{file_name_old_absolute_path}' to '{file_name_new_absolute_path}'")
     return False
 
 
+def create_parent_folder(absolute_path):
+    """Create the folders a mirrored subfolder output needs (#136, #157).
+
+    Files loaded from subfolders keep their sub path, so the output folder
+    structure has to exist before mkvmerge writes into it.
+    """
+    parent_folder = os.path.dirname(os.path.abspath(str(absolute_path)))
+    if parent_folder and not os.path.isdir(parent_folder):
+        os.makedirs(parent_folder, exist_ok=True)
+
+
+RELATIVE_FOLDER_PREFIXES = (".\\", "./", "..\\", "../")
+
+
+def is_relative_destination_folder(folder_path):
+    """True for a destination like "converted" or ".\\converted" (#118).
+
+    Such a destination is resolved against the folder of every source file, so
+    a queue that mixes folders still writes each output next to its own input.
+    """
+    text = str(folder_path or "").strip()
+    if not text:
+        return False
+    if text.startswith(RELATIVE_FOLDER_PREFIXES):
+        return True
+    if os.path.isabs(text):
+        return False
+    # "C:converted" is drive relative, not a folder name: leave it alone.
+    return os.path.splitdrive(text)[0] == ""
+
+
+def get_relative_destination_folder(job):
+    return os.path.normpath(os.path.join(os.path.dirname(job.video_name_absolute),
+                                         str(GlobalSetting.DESTINATION_FOLDER_PATH).strip()))
+
+
+def uses_relative_destination(job):
+    if job.used_mkvpropedit or GlobalSetting.OVERWRITE_SOURCE_FILES:
+        return False
+    return is_relative_destination_folder(GlobalSetting.DESTINATION_FOLDER_PATH)
+
+
 def get_output_folder_path(job):
     if job.used_mkvpropedit or GlobalSetting.OVERWRITE_SOURCE_FILES:
         return os.path.dirname(job.video_name_absolute)
+    if is_relative_destination_folder(GlobalSetting.DESTINATION_FOLDER_PATH):
+        return get_relative_destination_folder(job)
     return str(GlobalSetting.DESTINATION_FOLDER_PATH)
 
 
+def get_output_file_name(job):
+    if str(getattr(job, "custom_output_name", "")).strip() != "":
+        # An output name pattern decided the name of this job (#111).
+        return job.custom_output_name
+    file_name = get_file_name_with_mkv_extension(job.video_name)
+    if uses_relative_destination(job):
+        # The relative destination already follows the source file, so a sub
+        # path from a recursive scan would nest the tree twice.
+        file_name = os.path.basename(file_name)
+    return file_name
+
+
 def get_output_file_path(job):
-    output_video_name = Path(get_file_name_with_mkv_extension(job.video_name))
-    return os.path.join(get_output_folder_path(job), output_video_name)
+    return os.path.join(get_output_folder_path(job), get_output_file_name(job))
 
 
 def get_written_output_path(job):
@@ -143,6 +235,8 @@ def get_written_output_path(job):
         file_name = change_file_extension_to_mkv_with_random_suffix(job.video_name)
     else:
         file_name = get_file_name_with_mkv_extension(job.video_name)
+        if uses_relative_destination(job):
+            file_name = os.path.basename(file_name)
     return os.path.join(folder_path, file_name)
 
 
@@ -165,13 +259,13 @@ def finalize_muxing_output(job):
     the rename on the GUI thread used to race with the CRC worker reading it.
     """
     folder_path = get_output_folder_path(job)
-    final_name = get_file_name_with_mkv_extension(job.video_name)
+    final_name = get_output_file_name(job)
     final_path = os.path.join(folder_path, final_name)
     if GlobalSetting.OVERWRITE_SOURCE_FILES and not job.used_mkvpropedit:
-        # The muxer wrote "name#suffix.mkv"; replace the original source file.
+        # The muxer wrote "name#suffix.mkv" (in the relay folder when one is
+        # configured); replace the original source file.
         delete_file(job.video_name_absolute)
-        random_suffix_name = change_file_extension_to_mkv_with_random_suffix(job.video_name)
-        rename_file(os.path.join(folder_path, random_suffix_name), final_path)
+        rename_file(get_overwrite_temp_path(job), final_path)
     job.output_video_name = final_name
     job.output_video_absolute_path = final_path
     return final_path
@@ -180,9 +274,13 @@ def finalize_muxing_output(job):
 def apply_crc_to_output_name(job):
     """Rename the finished output according to the CRC options of the job."""
     folder_path = get_output_folder_path(job)
-    output_video_name = get_file_name_with_mkv_extension(job.video_name)
+    output_video_name = get_output_file_name(job)
     old_path = os.path.join(folder_path, output_video_name)
-    if job.is_crc_calculating_required:
+    if job.is_crc_calculating_required and "%crc%" in output_video_name:
+        # The pattern already reserved a place for the CRC (#111).
+        new_name = output_video_name.replace("%crc%", str(job.new_crc))
+        rename_file(old_path, os.path.join(folder_path, new_name))
+    elif job.is_crc_calculating_required:
         new_name = get_file_name_with_crc(output_video_name, job.new_crc)
         rename_file(old_path, os.path.join(folder_path, new_name))
     elif job.is_crc_removing_required:

@@ -6,6 +6,7 @@ import sys
 from packages.Startup import GlobalFiles
 from packages.Startup.PreDefined import ISO_639_2_LANGUAGES
 from packages.Tabs.GlobalSetting import GlobalSetting
+from packages.Tabs.MuxSetting.Widgets.ChapterDelay import get_shifted_chapters_file_path
 from packages.Tabs.MuxSetting.Widgets.SingleJobData import SingleJobData
 from packages.Widgets.SingleAttachmentData import SingleAttachmentData
 from packages.Widgets.SingleTrackData import SingleTrackData
@@ -159,9 +160,15 @@ class GetJsonForMkvpropeditJob:
     def setup_chapter_options(self):
         if GlobalSetting.CHAPTER_ENABLED:
             if self.job.chapter_found:
+                chapter_file_path = self.job.chapter_name_absolute
+                if int(GlobalSetting.CHAPTER_DELAY_MILLISECONDS) != 0:
+                    shifted_chapter_file_path = get_shifted_chapters_file_path(
+                        self.job, int(GlobalSetting.CHAPTER_DELAY_MILLISECONDS))
+                    if shifted_chapter_file_path != "":
+                        chapter_file_path = shifted_chapter_file_path
                 self.chapter_attach_command = add_json_line("--chapters") + \
                                               add_json_line(
-                                                  check_for_system_backslash_path(self.job.chapter_name_absolute))
+                                                  check_for_system_backslash_path(chapter_file_path))
             elif GlobalSetting.CHAPTER_DISCARD_OLD:
                 self.chapter_attach_command = add_json_line("--chapters") + add_json_line("")
 

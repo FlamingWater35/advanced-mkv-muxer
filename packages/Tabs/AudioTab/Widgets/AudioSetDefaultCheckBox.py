@@ -1,6 +1,7 @@
 from PySide6.QtGui import Qt
 from PySide6.QtWidgets import QCheckBox
 
+from packages.Startup.Options import Options, save_options
 from packages.Tabs.GlobalSetting import GlobalSetting
 
 
@@ -9,18 +10,30 @@ class AudioSetDefaultCheckBox(QCheckBox):
         super().__init__()
         self.tab_index = tab_index
         self.hint_when_enabled = ""
+        self.is_updating = False
         self.setText("Set Default")
         self.stateChanged.connect(self.change_global_audio_set_default)
 
     def change_global_audio_set_default(self):
-        GlobalSetting.AUDIO_SET_DEFAULT[self.tab_index] = self.checkState() == Qt.CheckState.Checked
-        if self.checkState() == Qt.CheckState.Checked:
-            for i in GlobalSetting.AUDIO_SET_DEFAULT.keys():
-                if i != self.tab_index:
-                    GlobalSetting.AUDIO_SET_DEFAULT[i] = False
+        # Several audio tracks may be flagged default (#162); see the
+        # "Make this audio default" option for the exclusive single track case.
+        is_checked = self.checkState() == Qt.CheckState.Checked
+        GlobalSetting.AUDIO_SET_DEFAULT[self.tab_index] = is_checked
+        if not self.is_updating and Options.Default_Audio_Set_Default != is_checked:
+            # Remember the tick so the next launch starts with it (#41).
+            Options.Default_Audio_Set_Default = is_checked
+            save_options()
+
+    def set_checked_silently(self, is_checked: bool):
+        """Change the tick without treating it as a user preference (#41)."""
+        self.is_updating = True
+        try:
+            self.setChecked(is_checked)
+        finally:
+            self.is_updating = False
 
     def update_check_state(self):
-        self.setChecked(bool(GlobalSetting.AUDIO_SET_DEFAULT[self.tab_index]))
+        self.set_checked_silently(bool(GlobalSetting.AUDIO_SET_DEFAULT[self.tab_index]))
         self.setDisabled(bool(GlobalSetting.AUDIO_SET_DEFAULT_DISABLED))
 
         if self.isEnabled():

@@ -34,6 +34,8 @@ class SingleJobData:
         self.discard_old_attachments = False
         self.allow_duplicates_attachments = False
 
+        self.queue_index = 0
+        self.custom_output_name = ""
         self.output_video_name = ""
         self.output_video_absolute_path = ""
 
@@ -43,6 +45,8 @@ class SingleJobData:
         self.progress = 0
         self.size_before_muxing = "0 MB"
         self.size_after_muxing = "0 MB"
+        self.size_before_muxing_bytes = 0
+        self.size_after_muxing_bytes = 0
 
         self.done = False
         self.error_occurred = False

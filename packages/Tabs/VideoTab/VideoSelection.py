@@ -1,4 +1,5 @@
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, QUrl
+from PySide6.QtGui import QDesktopServices
 
 from packages.Startup.Options import Options
 from packages.Tabs.GlobalSetting import *
@@ -6,8 +7,11 @@ from packages.Tabs.GlobalSetting import sort_names_like_windows, get_readable_fi
     get_file_name_absolute_path
 from packages.Tabs.VideoTab.Widgets.LoadingVideosInfoDialog import LoadingVideosInfoDialog
 from packages.Widgets.RefreshFilesButton import RefreshFilesButton
+from packages.Tabs.VideoTab.Widgets.SelectAllVideosCheckBox import SelectAllVideosCheckBox
 from packages.Tabs.VideoTab.Widgets.VideoClearButton import VideoClearButton
 from packages.Tabs.VideoTab.Widgets.VideoDefaultDurationFPSComboBox import VideoDefaultDurationFPSComboBox
+from packages.Tabs.VideoTab.Widgets.FixBitstreamTimingCheckBox import FixBitstreamTimingCheckBox
+from packages.Tabs.VideoTab.Widgets.IncludeSubfoldersCheckBox import IncludeSubfoldersCheckBox
 from packages.Tabs.VideoTab.Widgets.VideoExtensionsCheckableComboBox import VideoExtensionsCheckableComboBox
 from packages.Tabs.VideoTab.Widgets.VideoInfoButton import VideoInfoButton
 from packages.Tabs.VideoTab.Widgets.ModifyOldTracksWidgtes.ModifyOldTracksButton import ModifyOldTracksButton
@@ -15,9 +19,14 @@ from packages.Tabs.VideoTab.Widgets.VideoSourceButton import VideoSourceButton
 from packages.Tabs.VideoTab.Widgets.VideoSourceLineEdit import VideoSourceLineEdit
 from packages.Tabs.VideoTab.Widgets.VideoTable import VideoTable
 from packages.Widgets.ErrorDialog import ErrorDialog
+from packages.Widgets.FolderWatcher import FolderWatcher
 from packages.Widgets.InvalidPathDialog import *
 # noinspection PyAttributeOutsideInit
 from packages.Widgets.WarningDialog import WarningDialog
+
+
+def open_local_file(file_path):
+    QDesktopServices.openUrl(QUrl.fromLocalFile(str(file_path)))
 
 
 def get_files_size_list(files_list, folder_path):
@@ -58,6 +67,7 @@ def update_global_videos_tracks_info():
 
 class VideoSelectionSetting(GlobalSetting):
     tab_clicked_signal = Signal()
+    include_subfolders_changed_signal = Signal()
 
     def __init__(self):
         super().__init__()
@@ -68,10 +78,14 @@ class VideoSelectionSetting(GlobalSetting):
         self.video_extensions_label = QLabel()
         self.video_default_duration_fps_label = QLabel()
         self.video_default_duration_fps_comboBox = VideoDefaultDurationFPSComboBox()
+        self.fix_bitstream_timing_checkBox = FixBitstreamTimingCheckBox()
         self.video_extensions_comboBox = VideoExtensionsCheckableComboBox()
         self.video_modify_old_tracks_button = ModifyOldTracksButton()
         self.video_info_button = VideoInfoButton()
         self.video_refresh_files_button = RefreshFilesButton()
+        self.select_all_videos_checkBox = SelectAllVideosCheckBox()
+        self.include_subfolders_checkBox = IncludeSubfoldersCheckBox()
+        self.folder_watcher = FolderWatcher(parent=self)
         self.table = VideoTable()
         self.side_buttons_layout = QHBoxLayout()
         self.main_layout = QGridLayout()
@@ -101,6 +115,7 @@ class VideoSelectionSetting(GlobalSetting):
         self.setLayout(self.main_layout)
 
     def setup_side_buttons_layout(self):
+        self.side_buttons_layout.addWidget(self.select_all_videos_checkBox)
         self.side_buttons_layout.addWidget(self.video_modify_old_tracks_button)
         self.side_buttons_layout.addWidget(self.video_info_button)
 
@@ -109,6 +124,7 @@ class VideoSelectionSetting(GlobalSetting):
             self.video_source_lineEdit.set_text_safe_change(new_path)
             self.update_files_lists(new_path)
             self.show_files_list()
+            self.folder_watcher.watch_folder(self.folder_path)
             self.video_refresh_files_button.update_current_path(new_path=new_path)
             self.video_refresh_files_button.setEnabled(True)
         else:
@@ -217,24 +233,10 @@ class VideoSelectionSetting(GlobalSetting):
         self.video_refresh_files_button.setToolTip("Disabled due to Drag/Drop mode")
 
     def get_files_list(self, folder_path):
-        temp_files_names = sort_names_like_windows(names_list=os.listdir(folder_path))
-        temp_files_names_absolute = get_files_names_absolute_list(temp_files_names, folder_path)
-        current_extensions = self.video_extensions_comboBox.currentData()
-        result = []
-        for i in range(len(temp_files_names)):
-            if os.path.isdir(temp_files_names_absolute[i]):
-                continue
-            if os.path.getsize(temp_files_names_absolute[i]) == 0:
-                continue
-            for j in range(len(current_extensions)):
-                temp_file_extension_start_index = temp_files_names[i].rfind(".")
-                if temp_file_extension_start_index == -1:
-                    continue
-                temp_file_extension = temp_files_names[i][temp_file_extension_start_index + 1:]
-                if temp_file_extension.lower() == current_extensions[j].lower():
-                    result.append(temp_files_names[i])
-                    break
-        return result
+        return get_matching_files_in_folder(
+            folder_path,
+            extensions=self.video_extensions_comboBox.currentData(),
+            include_subfolders=GlobalSetting.INCLUDE_SUBFOLDERS)
 
     def move_video_file_down(self, video_index):
         self.files_names_list[video_index], self.files_names_list[video_index + 1] = self.files_names_list[
@@ -279,6 +281,21 @@ class VideoSelectionSetting(GlobalSetting):
                                    files_size_list=self.files_size_list)
         self.table.checking_row_updates = True
         self.update_other_classes_variables()
+        self.update_select_all_state()
+
+    def set_all_videos(self, is_checked):
+        if not self.files_names_list:
+            return
+        self.files_names_checked_list = [bool(is_checked)] * len(self.files_names_list)
+        self.show_files_list()
+
+    def update_select_all_state(self):
+        checked_count = sum(1 for is_checked in self.files_names_checked_list if is_checked)
+        self.select_all_videos_checkBox.set_state(checked_count, len(self.files_names_checked_list))
+
+    def open_video_file(self, row_index):
+        if 0 <= row_index < len(self.files_names_absolute_list):
+            open_local_file(self.files_names_absolute_list[row_index])
 
     def update_other_classes_variables(self):
         self.change_global_last_path_directory()
@@ -302,6 +319,7 @@ class VideoSelectionSetting(GlobalSetting):
 
     def clear_files(self):
         self.folder_path = ""
+        self.folder_watcher.clear()
         self.video_refresh_files_button.update_current_path(new_path="")
         self.video_refresh_files_button.setEnabled(True)
         self.files_names_list = []
@@ -329,10 +347,14 @@ class VideoSelectionSetting(GlobalSetting):
         self.main_layout.addWidget(self.video_clear_button, 0, 81)
         self.main_layout.addWidget(self.video_refresh_files_button, 0, 82)
         self.main_layout.addWidget(self.video_source_button, 0, 83)
+        self.main_layout.addWidget(self.include_subfolders_checkBox, 0, 84)
         self.main_layout.addWidget(self.video_extensions_label, 1, 0)
         self.main_layout.addWidget(self.video_extensions_comboBox, 1, 1)
         self.main_layout.addWidget(self.video_default_duration_fps_label, 1, 2)
-        self.main_layout.addWidget(self.video_default_duration_fps_comboBox, 1, 3)
+        self.default_duration_fps_layout = QHBoxLayout()
+        self.default_duration_fps_layout.addWidget(self.video_default_duration_fps_comboBox)
+        self.default_duration_fps_layout.addWidget(self.fix_bitstream_timing_checkBox)
+        self.main_layout.addLayout(self.default_duration_fps_layout, 1, 3)
         self.main_layout.addLayout(self.side_buttons_layout, 1, 4, 1, -1, alignment=Qt.AlignmentFlag.AlignRight)
         self.main_layout.addWidget(self.table, 2, 0, 1, -1)
 
@@ -394,6 +416,28 @@ class VideoSelectionSetting(GlobalSetting):
         self.tab_clicked_signal.connect(self.tab_clicked)
         self.table.move_video_to_down_signal.connect(self.move_video_file_down)
         self.table.move_video_to_up_signal.connect(self.move_video_file_up)
+        self.select_all_videos_checkBox.toggle_all_signal.connect(self.set_all_videos)
+        self.table.open_video_file_signal.connect(self.open_video_file)
+        self.include_subfolders_checkBox.subfolders_option_changed_signal.connect(
+            self.include_subfolders_option_changed)
+        self.folder_watcher.folder_changed_signal.connect(self.refresh_files_from_current_folder)
+
+    def include_subfolders_option_changed(self, is_included):
+        self.refresh_files_from_current_folder()
+        self.include_subfolders_changed_signal.emit()
+
+    def refresh_files_from_current_folder(self):
+        """Reload the current folder, e.g. after the subfolders option changed."""
+        if not (self.folder_path and not self.folder_path.isspace() and not self.is_drag_and_drop):
+            return
+        if not GlobalSetting.JOB_QUEUE_EMPTY:
+            # A muxing run owns these files, reloading them mid-run would only
+            # confuse the queue.
+            return
+        if self.get_files_list(self.folder_path) == self.files_names_list:
+            # Nothing was added or removed: keep the checks and the order.
+            return
+        self.update_folder_path(self.folder_path)
 
     def tab_clicked(self):
         if not GlobalSetting.JOB_QUEUE_EMPTY:
@@ -495,6 +539,7 @@ class VideoSelectionSetting(GlobalSetting):
         self.video_refresh_files_button.setEnabled(False)
         self.video_clear_button.setEnabled(False)
         self.video_default_duration_fps_comboBox.setEnabled(False)
+        self.select_all_videos_checkBox.setEnabled(False)
         self.table.setAcceptDrops(False)
         self.table.disable_selection()
 
@@ -504,6 +549,7 @@ class VideoSelectionSetting(GlobalSetting):
         self.video_source_button.setEnabled(True)
         self.video_clear_button.setEnabled(True)
         self.video_default_duration_fps_comboBox.setEnabled(True)
+        self.select_all_videos_checkBox.setEnabled(True)
         self.table.setAcceptDrops(True)
         if not self.is_drag_and_drop:
             self.video_refresh_files_button.setEnabled(True)

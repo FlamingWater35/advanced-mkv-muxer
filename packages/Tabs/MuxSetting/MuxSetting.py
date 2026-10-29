@@ -14,10 +14,19 @@ from PySide6.QtWidgets import (
 
 from packages.Startup.Options import Options
 from packages.Tabs.GlobalSetting import GlobalSetting, get_file_name_absolute_path, write_to_log_file, \
-    get_readable_filesize
+    get_readable_filesize, is_empty_matching_slot, filter_track_menu_entries, \
+    TRACK_SECTION_LANGUAGE, TRACK_SECTION_TRACK_ID, TRACK_SECTION_TRACK_NAME
+from packages.Tabs.MuxSetting.Widgets.AudioPreFlight import find_videos_without_audio, \
+    get_no_audio_warning_message
+from packages.Tabs.MuxSetting.Widgets.JobOutputFiles import is_relative_destination_folder, \
+    get_output_folder_path
 from packages.Tabs.MuxSetting.Widgets.AudioTracksCheckableComboBox import AudioTracksCheckableComboBox
 from packages.Tabs.MuxSetting.Widgets.ConfirmUsingMkvpropedit import ConfirmUsingMkvpropedit
 from packages.Tabs.MuxSetting.Widgets.ControlQueueButton import ControlQueueButton
+from packages.Tabs.MuxSetting.Widgets.DiscardAllTagsCheckBox import DiscardAllTagsCheckBox
+from packages.Tabs.MuxSetting.Widgets.ExtraMkvmergeArgumentsLineEdit import ExtraMkvmergeArgumentsLineEdit
+from packages.Tabs.MuxSetting.Widgets.OutputNamePatternLineEdit import OutputNamePatternLineEdit
+from packages.Tabs.MuxSetting.Widgets.StopAfterVideoEndsCheckBox import StopAfterVideoEndsCheckBox
 from packages.Tabs.MuxSetting.Widgets.JobQueueLayout import JobQueueLayout
 from packages.Tabs.MuxSetting.Widgets.MakeThisAudioDefaultCheckBox import MakeThisAudioDefaultCheckBox
 from packages.Tabs.MuxSetting.Widgets.MakeThisSubtitleDefaultCheckBox import MakeThisSubtitleDefaultCheckBox
@@ -26,11 +35,13 @@ from packages.Tabs.MuxSetting.Widgets.NoSpaceWarningDialog import NoSpaceWarning
 from packages.Tabs.MuxSetting.Widgets.OnlyKeepThoseAudiosCheckBox import OnlyKeepThoseAudiosCheckBox
 from packages.Tabs.MuxSetting.Widgets.OnlyKeepThoseSubtitlesCheckBox import OnlyKeepThoseSubtitlesCheckBox
 from packages.Tabs.MuxSetting.Widgets.OverwriteFilesDialog import OverwriteFilesDialog
+from packages.Tabs.MuxSetting.Widgets.SetTitleToFileNameCheckBox import SetTitleToFileNameCheckBox
 from packages.Tabs.MuxSetting.Widgets.SubtitleTracksCheckableComboBox import SubtitleTracksCheckableComboBox
 from packages.Widgets.ErrorMuxingDialog import ErrorMuxingDialog
 from packages.Widgets.FileNotFoundDialog import FileNotFoundDialog
 from packages.Widgets.InvalidPathDialog import *
 from packages.Widgets.NoSettingToApplyDialog import NoSettingToApplyDialog
+from packages.Widgets.YesNoDialog import YesNoDialog
 
 
 # noinspection PyAttributeOutsideInit
@@ -50,15 +61,17 @@ def change_global_LogFilePath():
 
 def check_is_there_subtitle_to_mux():
     for i in GlobalSetting.SUBTITLE_FILES_LIST.keys():
-        if len(GlobalSetting.SUBTITLE_FILES_LIST[i]) > 0:
-            return True
+        for file_name in GlobalSetting.SUBTITLE_FILES_LIST[i]:
+            if not is_empty_matching_slot(file_name):
+                return True
     return False
 
 
 def check_is_there_audio_to_mux():
     for i in GlobalSetting.AUDIO_FILES_LIST.keys():
-        if len(GlobalSetting.AUDIO_FILES_LIST[i]) > 0:
-            return True
+        for file_name in GlobalSetting.AUDIO_FILES_LIST[i]:
+            if not is_empty_matching_slot(file_name):
+                return True
     return False
 
 
@@ -80,7 +93,10 @@ def check_if_at_least_one_muxing_setting_has_been_selected(window_parent):
             GlobalSetting.VIDEO_OLD_TRACKS_VIDEOS_MODIFIED_ACTIVATED or \
             GlobalSetting.VIDEO_OLD_TRACKS_AUDIOS_MODIFIED_ACTIVATED or \
             GlobalSetting.VIDEO_OLD_TRACKS_SUBTITLES_MODIFIED_ACTIVATED or \
-            GlobalSetting.VIDEO_DEFAULT_DURATION_FPS not in ["", "Default"]:
+            GlobalSetting.VIDEO_DEFAULT_DURATION_FPS not in ["", "Default"] or \
+            GlobalSetting.MUX_SETTING_STOP_AFTER_VIDEO_ENDS or \
+            str(GlobalSetting.MUX_SETTING_EXTRA_ARGUMENTS).strip() != "" or \
+            str(GlobalSetting.MUX_SETTING_OUTPUT_NAME_PATTERN).strip() != "":
         return True
     else:
         no_setting_to_apply_dialog = NoSettingToApplyDialog(parent=window_parent)
@@ -102,6 +118,15 @@ def check_if_mkvpropedit_can_be_used():
             GlobalSetting.VIDEO_OLD_TRACKS_SUBTITLES_DELETED_ACTIVATED or \
             GlobalSetting.VIDEO_OLD_TRACKS_AUDIOS_REORDER_ACTIVATED or \
             GlobalSetting.VIDEO_OLD_TRACKS_AUDIOS_DELETED_ACTIVATED or not GlobalSetting.VIDEO_SOURCE_MKV_ONLY:
+        return False
+    # mkvpropedit cannot do these, so a queue using them has to be remuxed.
+    if GlobalSetting.VIDEO_FIX_BITSTREAM_TIMING_INFO or \
+            GlobalSetting.MUX_SETTING_SET_TITLE_TO_FILE_NAME or \
+            GlobalSetting.MUX_SETTING_DISCARD_ALL_TAGS or \
+            (GlobalSetting.CHAPTER_ENABLED and GlobalSetting.CHAPTER_GENERATE_BY_INTERVAL) or \
+            GlobalSetting.MUX_SETTING_STOP_AFTER_VIDEO_ENDS or \
+            str(GlobalSetting.MUX_SETTING_EXTRA_ARGUMENTS).strip() != "" or \
+            str(GlobalSetting.MUX_SETTING_OUTPUT_NAME_PATTERN).strip() != "":
         return False
     return True
 
@@ -245,6 +270,14 @@ class MuxSettingTab(QWidget):
         self.keep_log_file_checkBox = QCheckBox()
         self.add_crc_checksum_checkBox = QCheckBox()
         self.remove_old_crc_checksum_checkBox = QCheckBox()
+        self.set_title_checkBox = SetTitleToFileNameCheckBox()
+        self.discard_tags_checkBox = DiscardAllTagsCheckBox()
+        self.stop_after_video_ends_checkBox = StopAfterVideoEndsCheckBox()
+        self.extra_arguments_lineEdit = ExtraMkvmergeArgumentsLineEdit()
+        self.output_name_pattern_lineEdit = OutputNamePatternLineEdit()
+        self.extra_mux_options_layout = QVBoxLayout()
+        self.extra_options_checkBoxes_layout = QHBoxLayout()
+        self.extra_options_fields_layout = QHBoxLayout()
         self.control_queue_button = ControlQueueButton()
         self.clear_job_queue_button = QPushButton()
         self.mux_tools_layout_first_row = QHBoxLayout()
@@ -259,6 +292,18 @@ class MuxSettingTab(QWidget):
         self.mux_setting_layout.addWidget(self.only_keep_those_subtitles_checkBox, 2, 0)
         self.mux_setting_layout.addLayout(self.mux_tools_layout_first_row, 1, 1)
         self.mux_setting_layout.addLayout(self.mux_tools_layout_second_row, 2, 1)
+        self.extra_options_checkBoxes_layout.addWidget(self.set_title_checkBox)
+        self.extra_options_checkBoxes_layout.addWidget(self.discard_tags_checkBox)
+        self.extra_options_checkBoxes_layout.addWidget(self.stop_after_video_ends_checkBox)
+        self.extra_options_checkBoxes_layout.addStretch()
+        self.extra_options_fields_layout.addWidget(QLabel("Extra arguments"))
+        self.extra_options_fields_layout.addWidget(self.extra_arguments_lineEdit, 1)
+        self.output_name_label = QLabel("Output name")
+        self.extra_options_fields_layout.addWidget(self.output_name_label)
+        self.extra_options_fields_layout.addWidget(self.output_name_pattern_lineEdit, 1)
+        self.extra_mux_options_layout.addLayout(self.extra_options_checkBoxes_layout)
+        self.extra_mux_options_layout.addLayout(self.extra_options_fields_layout)
+        self.mux_setting_layout.addLayout(self.extra_mux_options_layout, 3, 1, 1, 2)
 
     def setup_mux_tools_layout_first_row(self):
         self.h1 = QHBoxLayout()
@@ -315,6 +360,10 @@ class MuxSettingTab(QWidget):
     def setup_destination_path_lineEdit(self):
         self.destination_path_lineEdit.setPlaceholderText("Enter Destination Folder Path [Leave Empty For Overwrite "
                                                           "Source Files]")
+        self.destination_path_lineEdit.setToolTip(
+            "An absolute folder collects every output there.\n"
+            "A relative folder such as \"converted\" or \".\\converted\" is created next to every "
+            "source video, which keeps the folder structure of the queue.")
         self.destination_path_lineEdit.setClearButtonEnabled(True)
 
     def setup_destination_path_label(self):
@@ -404,11 +453,17 @@ class MuxSettingTab(QWidget):
                 overwrite_dialog = OverwriteFilesDialog(parent=self)
                 overwrite_dialog.execute()
                 if overwrite_dialog.result == "Overwrite":
+                    relay_folder_path = overwrite_dialog.temp_folder_path
+                    if relay_folder_path and not self.check_relay_folder(relay_folder_path):
+                        return False
                     GlobalSetting.OVERWRITE_SOURCE_FILES = True
+                    GlobalSetting.OVERWRITE_TEMP_FOLDER_PATH = relay_folder_path
                     GlobalSetting.RANDOM_OUTPUT_SUFFIX = str(int(time.time()))
                     return True
                 else:
                     return False
+            if is_relative_destination_folder(temp_destination_path):
+                return self.check_relative_destination_path(temp_destination_path)
             # check if system is windows so path must have # SOME_LETTER:\
             if os.name == 'nt':
                 if temp_destination_path[1:3] != ":\\" and self.destination_path_lineEdit.text()[
@@ -416,19 +471,7 @@ class MuxSettingTab(QWidget):
                     "\\\\"):
                     raise Exception(f"[WinError 999] Not a valid path : '{temp_destination_path}'")
             ## test if i can write into this path:
-            makedirs(temp_destination_path, exist_ok=True)
-            test_file_name = str(time.time()) + ".txt"
-            test_file_name_absolute = os.path.join(Path(temp_destination_path), Path(test_file_name))
-            try:
-                with open(test_file_name_absolute, 'w+') as test_file:
-                    test_file.write("Test")
-                os.remove(test_file_name_absolute)
-            except Exception as e:
-                write_to_log_file(e)
-                invalid_dialog = InvalidPathDialog(window_title="Permission Denied",
-                                                   error_message="Advanced MKV Muxer lacks write "
-                                                                 "permissions on Destination folder", parent=self)
-                invalid_dialog.execute()
+            if not self.check_writable_folder(temp_destination_path):
                 self.destination_path_lineEdit.setText(GlobalSetting.DESTINATION_FOLDER_PATH)
                 return False
         except Exception as e:
@@ -451,7 +494,64 @@ class MuxSettingTab(QWidget):
             self.destination_path_lineEdit.setText(GlobalSetting.DESTINATION_FOLDER_PATH)
             return False
         GlobalSetting.DESTINATION_FOLDER_PATH = temp_destination_path
+        GlobalSetting.OVERWRITE_TEMP_FOLDER_PATH = ""
         return True
+
+    def check_writable_folder(self, folder_path, error_message="Advanced MKV Muxer lacks write "
+                                                               "permissions on Destination folder"):
+        try:
+            makedirs(folder_path, exist_ok=True)
+            test_file_name_absolute = os.path.join(Path(folder_path), Path(str(time.time()) + ".txt"))
+            with open(test_file_name_absolute, 'w+') as test_file:
+                test_file.write("Test")
+            os.remove(test_file_name_absolute)
+            return True
+        except Exception as e:
+            write_to_log_file(e)
+            invalid_dialog = InvalidPathDialog(window_title="Permission Denied",
+                                               error_message=error_message, parent=self)
+            invalid_dialog.execute()
+            return False
+
+    def check_relative_destination_path(self, temp_destination_path):
+        """A relative destination such as ".\\converted" follows every source
+        file, so it is resolved and validated per folder (#118)."""
+        resolved_folders = []
+        for video_absolute_path in GlobalSetting.VIDEO_FILES_ABSOLUTE_PATH_LIST:
+            folder_path = os.path.normpath(os.path.join(os.path.dirname(video_absolute_path),
+                                                        temp_destination_path))
+            if folder_path not in resolved_folders:
+                resolved_folders.append(folder_path)
+        for folder_path in resolved_folders:
+            if Path(folder_path) in GlobalSetting.VIDEO_SOURCE_PATHS:
+                invalid_dialog = InvalidPathDialog(
+                    error_message="Some Source and destination videos are in the same folder", parent=self)
+                invalid_dialog.execute()
+                self.destination_path_lineEdit.setText(GlobalSetting.DESTINATION_FOLDER_PATH)
+                return False
+        for folder_path in resolved_folders:
+            if not self.check_writable_folder(folder_path):
+                self.destination_path_lineEdit.setText(GlobalSetting.DESTINATION_FOLDER_PATH)
+                return False
+        GlobalSetting.DESTINATION_FOLDER_PATH = temp_destination_path
+        GlobalSetting.OVERWRITE_TEMP_FOLDER_PATH = ""
+        return True
+
+    def check_relay_folder(self, folder_path):
+        try:
+            makedirs(folder_path, exist_ok=True)
+            test_file_name_absolute = os.path.join(Path(folder_path), Path(str(time.time()) + ".txt"))
+            with open(test_file_name_absolute, 'w+') as test_file:
+                test_file.write("Test")
+            os.remove(test_file_name_absolute)
+            return True
+        except Exception as e:
+            write_to_log_file(e)
+            invalid_dialog = InvalidPathDialog(window_title="Permission Denied",
+                                               error_message="Advanced MKV Muxer lacks write "
+                                                             "permissions on the relay/temp folder", parent=self)
+            invalid_dialog.execute()
+            return False
 
     def check_available_space(self):
         if GlobalSetting.USE_MKVPROPEDIT:
@@ -480,14 +580,15 @@ class MuxSettingTab(QWidget):
             except Exception as e:
                 write_to_log_file(e)
                 return True
-        if GlobalSetting.OVERWRITE_SOURCE_FILES:
+        if GlobalSetting.OVERWRITE_SOURCE_FILES or is_relative_destination_folder(
+                GlobalSetting.DESTINATION_FOLDER_PATH):
             try:
                 for job in self.job_queue_layout.table.data:
                     if not job.done or (
                             job.error_occurred and job.muxing_message.find("There is not enough space") != -1):
                         file_size = get_approximate_size_of_output_of_job(job)
                         needed_space = file_size
-                        free_space = shutil.disk_usage(path=os.path.dirname(job.video_name_absolute)).free
+                        free_space = shutil.disk_usage(path=get_output_folder_path(job)).free
                         readable_needed_space = get_readable_filesize(needed_space)
                         readable_free_space = get_readable_filesize(free_space)
                         if free_space - needed_space <= 1024:
@@ -550,8 +651,13 @@ class MuxSettingTab(QWidget):
     def setup_tracks_to_be_chosen_mkv_only_options(self):
         self.only_keep_those_subtitles_multi_choose_comboBox.refresh_tracks()
         self.only_keep_those_audios_multi_choose_comboBox.refresh_tracks()
-        self.make_this_subtitle_default_comboBox.refresh_tracks(new_list=GlobalSetting.MUX_SETTING_SUBTITLE_TRACKS_LIST)
-        self.make_this_audio_default_comboBox.refresh_tracks(new_list=GlobalSetting.MUX_SETTING_AUDIO_TRACKS_LIST)
+        # The single choice "Make This Track Default" menus only understand the
+        # id/language/name sections, so the shared list is filtered for them.
+        allowed_sections = (TRACK_SECTION_TRACK_ID, TRACK_SECTION_LANGUAGE, TRACK_SECTION_TRACK_NAME)
+        self.make_this_subtitle_default_comboBox.refresh_tracks(
+            new_list=filter_track_menu_entries(GlobalSetting.MUX_SETTING_SUBTITLE_TRACKS_LIST, allowed_sections))
+        self.make_this_audio_default_comboBox.refresh_tracks(
+            new_list=filter_track_menu_entries(GlobalSetting.MUX_SETTING_AUDIO_TRACKS_LIST, allowed_sections))
 
     def setup_enable_options_based_on_global_state(self):
         if GlobalSetting.JOB_QUEUE_EMPTY:
@@ -613,6 +719,8 @@ class MuxSettingTab(QWidget):
         self.make_this_audio_default_comboBox.setEnabled(False)
         self.add_crc_checksum_checkBox.setEnabled(False)
         self.remove_old_crc_checksum_checkBox.setEnabled(False)
+        self.set_title_checkBox.setEnabled(False)
+        self.discard_tags_checkBox.setEnabled(False)
 
     def enable_editable_widgets(self):
         self.only_keep_those_subtitles_checkBox.setEnabled(True)
@@ -626,6 +734,8 @@ class MuxSettingTab(QWidget):
         self.make_this_audio_default_comboBox.setEnabled(self.make_this_audio_default_checkBox.isChecked())
         self.add_crc_checksum_checkBox.setEnabled(True)
         self.remove_old_crc_checksum_checkBox.setEnabled(True)
+        self.set_title_checkBox.setEnabled(True)
+        self.discard_tags_checkBox.setEnabled(True)
 
     def only_keep_those_audios_close_list(self):
         GlobalSetting.MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_LANGUAGES = self.only_keep_those_audios_multi_choose_comboBox.tracks_language
@@ -715,6 +825,8 @@ class MuxSettingTab(QWidget):
         all_input_videos_are_found = self.check_if_all_input_videos_are_found()
         if not all_input_videos_are_found:
             return
+        if not self.confirm_muxing_without_audio():
+            return
         self.setup_log_file()
         self.control_queue_button.set_state_pause_multiplexing()
         self.disable_muxing_setting()
@@ -725,8 +837,16 @@ class MuxSettingTab(QWidget):
     def check_if_want_to_keep_log_file(self):
         if GlobalSetting.MUX_SETTING_KEEP_LOG_FILE:
             if not GlobalSetting.OVERWRITE_SOURCE_FILES:
+                log_folder_path = GlobalSetting.DESTINATION_FOLDER_PATH
+                if is_relative_destination_folder(log_folder_path):
+                    # A relative destination has one folder per source file, so
+                    # the log goes with the first source of the queue (#118).
+                    if len(GlobalSetting.VIDEO_FILES_ABSOLUTE_PATH_LIST) == 0:
+                        return
+                    log_folder_path = os.path.normpath(os.path.join(
+                        os.path.dirname(GlobalSetting.VIDEO_FILES_ABSOLUTE_PATH_LIST[0]), log_folder_path))
                 try:
-                    copy2(GlobalFiles.MuxingLogFilePath, GlobalSetting.DESTINATION_FOLDER_PATH)
+                    copy2(GlobalFiles.MuxingLogFilePath, log_folder_path)
                 except Exception as e:
                     write_to_log_file(e)
                     error_dialog = ErrorMuxingDialog(window_title="Permission Denied",
@@ -787,6 +907,17 @@ class MuxSettingTab(QWidget):
                 invalid_dialog.execute()
                 return False
         return True
+
+    def confirm_muxing_without_audio(self):
+        """Ask before a queue that would silently drop every audio track (#144)."""
+        videos_without_audio = find_videos_without_audio()
+        if len(videos_without_audio) == 0:
+            return True
+        dialog = YesNoDialog(parent=self)
+        dialog.setWindowTitle("No Audio Track")
+        dialog.message.setText(get_no_audio_warning_message(videos_without_audio))
+        dialog.exec()
+        return dialog.result == "Yes"
 
     def setup_log_file(self):
         if self.control_queue_button.state == "START":

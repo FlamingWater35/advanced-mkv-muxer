@@ -7,10 +7,14 @@ from PySide6.QtWidgets import (
 from packages.Startup.Options import Options
 from packages.Tabs.ChapterTab.Widgets.ChapterClearButton import ChapterClearButton
 from packages.Tabs.ChapterTab.Widgets.ChapterExtensionsCheckableComboBox import ChapterExtensionsCheckableComboBox
+from packages.Tabs.ChapterTab.Widgets.ChapterDelaySpinBox import ChapterDelaySpinBox
+from packages.Tabs.ChapterTab.Widgets.ChapterGenerateIntervalSpinBox import ChapterGenerateIntervalSpinBox
 from packages.Tabs.ChapterTab.Widgets.ChapterSourceButton import ChapterSourceButton
 from packages.Tabs.ChapterTab.Widgets.ChapterSourceLineEdit import ChapterSourceLineEdit
 from packages.Tabs.ChapterTab.Widgets.DiscardOldChaptersCheckBox import DiscardOldChaptersCheckBox
+from packages.Tabs.ChapterTab.Widgets.GenerateChaptersCheckBox import GenerateChaptersCheckBox
 from packages.Tabs.ChapterTab.Widgets.MatchChapterLayout import MatchChapterLayout
+from packages.Widgets.FolderWatcher import FolderWatcher
 from packages.Widgets.RefreshFilesButton import RefreshFilesButton
 from packages.Tabs.GlobalSetting import *
 from packages.Widgets.InvalidPathDialog import *
@@ -38,6 +42,11 @@ class ChapterSelectionSetting(GlobalSetting):
         self.chapter_clear_button = ChapterClearButton()
         self.chapter_refresh_files_button = RefreshFilesButton()
         self.discard_old_chapters_checkBox = DiscardOldChaptersCheckBox()
+        self.generate_chapters_checkBox = GenerateChaptersCheckBox()
+        self.chapter_interval_label = QLabel("every")
+        self.chapter_interval_spinBox = ChapterGenerateIntervalSpinBox()
+        self.chapter_delay_label = QLabel("delay")
+        self.chapter_delay_spinBox = ChapterDelaySpinBox()
         self.chapter_extensions_comboBox = ChapterExtensionsCheckableComboBox()
         self.chapter_match_layout = MatchChapterLayout(parent=self)
         self.chapter_options_layout = QHBoxLayout()
@@ -54,6 +63,7 @@ class ChapterSelectionSetting(GlobalSetting):
     # noinspection PyUnresolvedReferences
     def connect_signals(self):
         self.chapter_main_groupBox.toggled.connect(self.activate_tab)
+        self.generate_chapters_checkBox.toggled.connect(self.generate_chapters_toggled)
         self.chapter_source_button.clicked_signal.connect(self.update_folder_path)
         self.chapter_source_lineEdit.edit_finished_signal.connect(self.update_folder_path)
         self.chapter_refresh_files_button.clicked_signal.connect(self.update_folder_path)
@@ -65,6 +75,7 @@ class ChapterSelectionSetting(GlobalSetting):
         self.chapter_match_layout.chapter_table.drop_folder_and_files_signal.connect(
             self.update_files_with_drag_and_drop)
         self.chapter_clear_button.clear_files_signal.connect(self.clear_files)
+        self.folder_watcher.folder_changed_signal.connect(self.refresh_files_from_current_folder)
 
     def create_properties(self):
         self.folder_path = ""
@@ -74,6 +85,7 @@ class ChapterSelectionSetting(GlobalSetting):
         self.files_names_absolute_list_with_dropped_files = []
         self.current_chapter_extensions = Options.CurrentPreset.Default_Chapter_Extensions
         self.is_drag_and_drop = False
+        self.folder_watcher = FolderWatcher(parent=self)
 
     def setup_layouts(self):
         self.setup_chapter_options_layout()
@@ -83,8 +95,15 @@ class ChapterSelectionSetting(GlobalSetting):
 
     def setup_chapter_options_layout(self):
         self.chapter_options_layout.addWidget(self.chapter_extensions_comboBox)
+        self.chapter_options_layout.addWidget(self.generate_chapters_checkBox)
+        self.chapter_options_layout.addWidget(self.chapter_interval_label)
+        self.chapter_options_layout.addWidget(self.chapter_interval_spinBox)
+        self.chapter_options_layout.addWidget(self.chapter_delay_label)
+        self.chapter_options_layout.addWidget(self.chapter_delay_spinBox)
         self.chapter_options_layout.addStretch()
         self.chapter_options_layout.addWidget(self.discard_old_chapters_checkBox, alignment=Qt.AlignmentFlag.AlignRight)
+        self.chapter_interval_label.setEnabled(self.generate_chapters_checkBox.isChecked())
+        self.chapter_interval_spinBox.setEnabled(self.generate_chapters_checkBox.isChecked())
 
     def setup_main_layout(self):
         self.main_layout.addWidget(self.chapter_source_label, 0, 0)
@@ -108,6 +127,7 @@ class ChapterSelectionSetting(GlobalSetting):
             self.chapter_source_lineEdit.set_text_safe_change(new_path)
             self.update_files_lists(new_path)
             self.show_chapter_files_list()
+            self.folder_watcher.watch_folder(self.folder_path)
             self.chapter_refresh_files_button.update_current_path(new_path=new_path)
             self.chapter_refresh_files_button.setEnabled(True)
         else:
@@ -163,24 +183,20 @@ class ChapterSelectionSetting(GlobalSetting):
             self.show_chapter_files_list()
 
     def get_files_list(self, folder_path):
-        temp_files_names = sort_names_like_windows(names_list=os.listdir(folder_path))
-        temp_files_names_absolute = get_files_names_absolute_list(temp_files_names, folder_path)
-        current_extensions = self.chapter_extensions_comboBox.currentData()
-        result = []
-        for i in range(len(temp_files_names)):
-            if os.path.isdir(temp_files_names_absolute[i]):
-                continue
-            if os.path.getsize(temp_files_names_absolute[i]) == 0:
-                continue
-            for j in range(len(current_extensions)):
-                temp_file_extension_start_index = temp_files_names[i].rfind(".")
-                if temp_file_extension_start_index == -1:
-                    continue
-                temp_file_extension = temp_files_names[i][temp_file_extension_start_index + 1:]
-                if temp_file_extension.lower() == current_extensions[j].lower():
-                    result.append(temp_files_names[i])
-                    break
-        return result
+        return get_matching_files_in_folder(
+            folder_path,
+            extensions=self.chapter_extensions_comboBox.currentData(),
+            include_subfolders=GlobalSetting.INCLUDE_SUBFOLDERS)
+
+    def refresh_files_from_current_folder(self):
+        """Reload the current folder, e.g. after the subfolders option changed."""
+        if not (self.folder_path and not self.folder_path.isspace() and not self.is_drag_and_drop):
+            return
+        if not GlobalSetting.JOB_QUEUE_EMPTY:
+            return
+        if self.get_files_list(self.folder_path) == self.files_names_list:
+            return
+        self.update_folder_path(self.folder_path)
 
     def show_chapter_files_list(self):
         self.update_other_classes_variables()
@@ -200,6 +216,7 @@ class ChapterSelectionSetting(GlobalSetting):
 
     def clear_files(self):
         self.folder_path = ""
+        self.folder_watcher.clear()
         self.files_names_list = []
         self.files_names_absolute_list = []
         self.files_names_absolute_list_with_dropped_files = []
@@ -267,10 +284,17 @@ class ChapterSelectionSetting(GlobalSetting):
         else:
             self.enable_editable_widgets()
 
+    def generate_chapters_toggled(self, new_state):
+        self.chapter_interval_label.setEnabled(bool(new_state))
+        self.chapter_interval_spinBox.setEnabled(bool(new_state))
+
     def disable_editable_widgets(self):
         self.chapter_source_lineEdit.setEnabled(False)
         self.chapter_source_button.setEnabled(False)
         self.discard_old_chapters_checkBox.setEnabled(False)
+        self.generate_chapters_checkBox.setEnabled(False)
+        self.chapter_interval_label.setEnabled(False)
+        self.chapter_interval_spinBox.setEnabled(False)
         self.chapter_extensions_comboBox.setEnabled(False)
         self.chapter_clear_button.setEnabled(False)
         self.chapter_refresh_files_button.setEnabled(False)
@@ -281,6 +305,8 @@ class ChapterSelectionSetting(GlobalSetting):
         self.chapter_source_lineEdit.setEnabled(True)
         self.chapter_source_button.setEnabled(True)
         self.discard_old_chapters_checkBox.setEnabled(True)
+        self.generate_chapters_checkBox.setEnabled(True)
+        self.generate_chapters_toggled(self.generate_chapters_checkBox.isChecked())
         self.chapter_extensions_comboBox.setEnabled(True)
         self.chapter_clear_button.setEnabled(True)
         if not self.is_drag_and_drop:

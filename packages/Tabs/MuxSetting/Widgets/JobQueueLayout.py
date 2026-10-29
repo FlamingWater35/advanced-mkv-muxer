@@ -7,6 +7,7 @@ from packages.Tabs.MuxSetting.Widgets.CompletedJobsCounter import CompletedJobsC
 from packages.Tabs.MuxSetting.Widgets.JobDividingLine import JobDividingLine
 from packages.Tabs.MuxSetting.Widgets.JobQueueTable import JobQueueTable
 from packages.Tabs.MuxSetting.Widgets.ProgreeBar import ProgressBar
+from packages.Tabs.MuxSetting.Widgets.TotalSizeChangeLabel import TotalSizeChangeLabel
 
 
 class JobQueueLayout(QGridLayout):
@@ -23,8 +24,10 @@ class JobQueueLayout(QGridLayout):
         self.total_progress_progressBar = ProgressBar(value=0, show_percentage=True)
         self.job_dividing_line = JobDividingLine()
         self.completed_jobs_counter = CompletedJobsCounter()
+        self.total_size_change_label = TotalSizeChangeLabel()
         self.setup_layout()
         self.table.update_total_progress_signal.connect(self.update_total_progress)
+        self.table.update_total_size_change_signal.connect(self.total_size_change_label.update_total_size_change)
         self.table.paused_done_signal.connect(self.paused_done)
         self.table.cancel_done_signal.connect(self.cancel_done)
         self.table.pause_from_error_occurred_signal.connect(self.pause_from_error_occurred)
@@ -39,6 +42,7 @@ class JobQueueLayout(QGridLayout):
         self.addWidget(self.total_progress_progressBar, 1, 1, 1, 1)
         self.addWidget(self.job_dividing_line, 1, 2, 1, 1)
         self.addWidget(self.completed_jobs_counter, 1, 3, 1, 1)
+        self.addWidget(self.total_size_change_label, 1, 4, 1, 1)
 
     def update_layout(self):
         self.table.update_widget()

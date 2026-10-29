@@ -43,6 +43,64 @@ def generate_track_ids(ids_list):
     return res
 
 
+# Section headers of the "Only Keep Those ..." / "Make This ... Default"
+# menus. Every one of them is a non selectable separator row.
+TRACK_SECTION_ORDER = "---Track Order---"
+TRACK_SECTION_TRACK_ID = "---Track Id---"
+TRACK_SECTION_LANGUAGE = "---Language---"
+TRACK_SECTION_FORMAT = "---Format---"
+TRACK_SECTION_TRACK_NAME = "---Track Name---"
+
+
+def is_track_menu_section(text):
+    """True for a section header row of a track menu."""
+    text = str(text)
+    return text.startswith("---") and text.endswith("---")
+
+
+def generate_track_id_with_language(track_id, language_name):
+    """A "Track Id" entry that also shows the language of the track (#139)."""
+    return "Track " + str(track_id) + " - " + str(language_name)
+
+
+def get_track_id_from_menu_entry(entry_text):
+    """"Track 02 - French" -> "02"; None for anything else."""
+    parts = str(entry_text).split(" ")
+    if len(parts) < 2 or parts[0] != "Track":
+        return None
+    return parts[1]
+
+
+def get_track_order_from_menu_entry(entry_text):
+    """"Order 2" -> 2 (one based); None for anything else."""
+    parts = str(entry_text).split(" ")
+    if len(parts) != 2 or parts[0] != "Order":
+        return None
+    try:
+        return int(parts[1])
+    except ValueError:
+        return None
+
+
+def filter_track_menu_entries(texts, allowed_sections):
+    """Keep the sections (and their entries) the caller can handle.
+
+    The "Make This Track Default" menu cannot use the order/format sections, so
+    it is fed a filtered copy of the shared track list.
+    """
+    result = []
+    current_section = ""
+    for text in texts:
+        if is_track_menu_section(text):
+            current_section = text
+            if current_section in allowed_sections:
+                result.append(text)
+            continue
+        if current_section in allowed_sections:
+            result.append(text)
+    return result
+
+
 def get_readable_filesize(size_bytes, suffix='B'):
     for unit in ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z']:
         if abs(size_bytes) < 1024.0:
@@ -69,6 +127,83 @@ def convert_string_to_boolean(string):
         return False
 
 
+def reset_track_flags(flags):
+    """Clear every per-track default/forced flag.
+
+    Several tracks may be flagged at once, so a caller that takes over the
+    flags (the "Make this ... default" mux options) has to clear all of them,
+    not only the last one it finds.
+    """
+    for key in flags:
+        flags[key] = False
+
+
+EMPTY_MATCHING_SLOT = "<empty>"
+EMPTY_MATCHING_SLOT_DISPLAY_NAME = "(empty)"
+
+
+def is_empty_matching_slot(file_name):
+    """True when this matching-list entry is a deliberately empty slot.
+
+    A slot keeps the file lists aligned with the video list, so a subtitle or
+    an audio file can be attached to a specific episode without shifting every
+    later file up one row (#158, #120).
+    """
+    return file_name == EMPTY_MATCHING_SLOT
+
+
+def insert_empty_matching_slot(files_list, absolute_path_list, index):
+    """Insert an empty slot at index, keeping both lists the same length."""
+    index = max(0, min(index, len(files_list)))
+    files_list.insert(index, EMPTY_MATCHING_SLOT)
+    absolute_path_list.insert(index, "")
+
+
+def is_usable_matching_file(absolute_path, file_name, extensions):
+    """True when this entry is a non-empty file this tab can use."""
+    if not os.path.isfile(absolute_path):
+        return False
+    try:
+        if os.path.getsize(absolute_path) == 0:
+            return False
+    except OSError:
+        return False
+    if extensions is None:
+        return True
+    extension_start_index = file_name.rfind(".")
+    if extension_start_index == -1:
+        return False
+    file_extension = file_name[extension_start_index + 1:]
+    for extension in extensions:
+        if file_extension.lower() == extension.lower():
+            return True
+    return False
+
+
+def get_matching_files_in_folder(folder_path, extensions=None, include_subfolders=False):
+    """List the usable files of a source folder (#136, #157).
+
+    With ``include_subfolders`` the whole tree is scanned and each name keeps
+    its sub path ("Season 1/episode 1.srt"), so names stay unique and the
+    absolute path can still be rebuilt with os.path.join. The order is
+    depth-first with every folder and file sorted like Windows Explorer.
+    """
+    result = []
+    if include_subfolders:
+        for current_folder, folders_names, files_names in os.walk(folder_path):
+            folders_names[:] = sort_names_like_windows(folders_names)
+            for file_name in sort_names_like_windows(files_names):
+                absolute_path = os.path.join(current_folder, file_name)
+                if is_usable_matching_file(absolute_path, file_name, extensions):
+                    result.append(os.path.relpath(absolute_path, folder_path))
+    else:
+        for file_name in sort_names_like_windows(os.listdir(folder_path)):
+            absolute_path = os.path.join(folder_path, file_name)
+            if is_usable_matching_file(absolute_path, file_name, extensions):
+                result.append(file_name)
+    return result
+
+
 def convert_boolean_to_checked_value(value):
     if value is None:
         return 1  # Qt.CheckState.PartiallyChecked
@@ -92,44 +227,63 @@ def write_to_log_file(exception):
 def refresh_tracks(track_type):
     videos = GlobalSetting.VIDEO_FILES_ABSOLUTE_PATH_LIST.copy()
     new_list = []
-    audios_track_ids = []
-    audios_track_languages = []
-    audios_track_names = []
+    # Track ids keep the language they were found with, so the "Track Id"
+    # entries can show it (#139).
+    tracks_id_languages = {}
+    tracks_languages = []
+    tracks_names = []
+    tracks_formats = []
+    max_tracks_count = 0
     for video_name in videos:
         string_name_hash = hashlib.sha1((str(video_name)).encode('utf-8')).hexdigest()
         media_info_file_path = os.path.join(GlobalFiles.MediaInfoFolderPath, string_name_hash + ".json")
         with open(media_info_file_path, 'r', encoding="UTF-8") as media_info_file:
             json_info = json.load(media_info_file)
         tracks_json_info = json_info["tracks"]
-        for track in tracks_json_info:
-            if track["type"] == track_type:
-                audios_track_ids.append(str(track["id"]))
-                language = str(
-                    get_attribute(data=track["properties"], attribute="language", default_value="UND"))
-                language_symbol = language.lower()
-                audios_track_languages.append(ISO_639_2_SYMBOLS.get(language_symbol, "Undetermined"))
-                name = str(get_attribute(data=track["properties"], attribute="track_name",
-                                         default_value="UnNamedTrackBeBo"))
-                if name != "UnNamedTrackBeBo":
-                    audios_track_names.append(name)
+        tracks_of_type = [track for track in tracks_json_info if track["type"] == track_type]
+        max_tracks_count = max(max_tracks_count, len(tracks_of_type))
+        for track in tracks_of_type:
+            language = str(
+                get_attribute(data=track["properties"], attribute="language", default_value="UND"))
+            language_name = ISO_639_2_SYMBOLS.get(language.lower(), "Undetermined")
+            track_id = convert_string_integer_to_two_digit_string(str(track["id"]))
+            if track_id not in tracks_id_languages:
+                tracks_id_languages[track_id] = language_name
+            tracks_languages.append(language_name)
+            name = str(get_attribute(data=track["properties"], attribute="track_name",
+                                     default_value="UnNamedTrackBeBo"))
+            if name != "UnNamedTrackBeBo":
+                tracks_names.append(name)
+            codec = str(track.get("codec") or get_attribute(data=track["properties"], attribute="codec",
+                                                            default_value=""))
+            if codec != "":
+                tracks_formats.append(codec)
 
-    audios_track_ids = list(dict.fromkeys(audios_track_ids))
-    audios_track_languages = list(dict.fromkeys(audios_track_languages))
-    audios_track_names = list(dict.fromkeys(audios_track_names))
-    for i in range(len(audios_track_ids)):
-        audios_track_ids[i] = convert_string_integer_to_two_digit_string(audios_track_ids[i])
-    audios_track_ids.sort()
-    audios_track_languages.sort()
-    audios_track_names.sort()
-    if len(audios_track_ids) > 0:
-        new_list = ["---Track Id---"]
-        new_list.extend(generate_track_ids(audios_track_ids))
-    if len(audios_track_languages) > 0:
-        new_list.append("---Language---")
-        new_list.extend(audios_track_languages)
-    if len(audios_track_names) > 0:
-        new_list.append("---Track Name---")
-        new_list.extend(audios_track_names)
+    # The order of the tracks inside one file is what the user sees in a media
+    # player, which is why it gets its own section (#141).
+    tracks_order = ["Order " + str(index + 1) for index in range(max_tracks_count)]
+    tracks_languages = list(dict.fromkeys(tracks_languages))
+    tracks_names = list(dict.fromkeys(tracks_names))
+    tracks_formats = list(dict.fromkeys(tracks_formats))
+    tracks_languages.sort()
+    tracks_names.sort()
+    tracks_formats.sort()
+    if len(tracks_order) > 0:
+        new_list = [TRACK_SECTION_ORDER]
+        new_list.extend(tracks_order)
+    if len(tracks_id_languages) > 0:
+        new_list.append(TRACK_SECTION_TRACK_ID)
+        for track_id in sorted(tracks_id_languages.keys()):
+            new_list.append(generate_track_id_with_language(track_id, tracks_id_languages[track_id]))
+    if len(tracks_languages) > 0:
+        new_list.append(TRACK_SECTION_LANGUAGE)
+        new_list.extend(tracks_languages)
+    if len(tracks_formats) > 0:
+        new_list.append(TRACK_SECTION_FORMAT)
+        new_list.extend(tracks_formats)
+    if len(tracks_names) > 0:
+        new_list.append(TRACK_SECTION_TRACK_NAME)
+        new_list.extend(tracks_names)
     return new_list
 
 
@@ -233,12 +387,14 @@ def refresh_old_tracks_info(track_type):
 
 class GlobalSetting(QWidget):
     LAST_DIRECTORY_PATH = ""
+    INCLUDE_SUBFOLDERS = False
     VIDEO_SOURCE_PATHS = []
     VIDEO_FILES_LIST = []
     VIDEO_FILES_SIZE_LIST = []
     VIDEO_FILES_ABSOLUTE_PATH_LIST = []
     VIDEO_SOURCE_MKV_ONLY = False
     VIDEO_DEFAULT_DURATION_FPS = ""
+    VIDEO_FIX_BITSTREAM_TIMING_INFO = False
     VIDEO_OLD_TRACKS_VIDEOS_INFO: List[List[SingleOldTrackData]] = []
     VIDEO_OLD_TRACKS_AUDIOS_INFO: List[List[SingleOldTrackData]] = []
     VIDEO_OLD_TRACKS_SUBTITLES_INFO: List[List[SingleOldTrackData]] = []
@@ -270,6 +426,7 @@ class GlobalSetting(QWidget):
     SUBTITLE_SET_DEFAULT_DISABLED = False
     SUBTITLE_SET_FORCED_DISABLED = False
     SUBTITLE_LANGUAGE = defaultdict(str)
+    SUBTITLE_MATCH_LANGUAGE_BY_FILE_NAME = defaultdict(bool)
 
     AUDIO_ENABLED = False
     AUDIO_TAB_ENABLED = defaultdict(bool)
@@ -293,23 +450,32 @@ class GlobalSetting(QWidget):
 
     ATTACHMENT_EXPERT_MODE = False
     ATTACHMENT_PATH_DATA_LIST: List[PathData] = []
+    ATTACHMENT_AUTO_DETECT_FONTS = False
+    ATTACHMENT_SEARCH_FOLDERS = []
 
     CHAPTER_ENABLED = False
     CHAPTER_FILES_LIST = []
     CHAPTER_FILES_ABSOLUTE_PATH_LIST = []
     CHAPTER_DISCARD_OLD = False
+    CHAPTER_GENERATE_BY_INTERVAL = False
+    CHAPTER_GENERATE_INTERVAL_SECONDS = 120
+    CHAPTER_DELAY_MILLISECONDS = 0
 
     MUX_SETTING_AUDIO_TRACKS_LIST = []
     MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_ENABLED = False
     MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_IDS = []
     MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_LANGUAGES = []
     MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_NAMES = []
+    MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_ORDERS = []
+    MUX_SETTING_ONLY_KEEP_THOSE_AUDIOS_TRACKS_FORMATS = []
 
     MUX_SETTING_SUBTITLE_TRACKS_LIST = []
     MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_ENABLED = False
     MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_IDS = []
     MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_LANGUAGES = []
     MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_NAMES = []
+    MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_ORDERS = []
+    MUX_SETTING_ONLY_KEEP_THOSE_SUBTITLES_TRACKS_FORMATS = []
 
     MUX_SETTING_MAKE_THIS_AUDIO_DEFAULT_SEMI_ENABLED = False
     MUX_SETTING_MAKE_THIS_AUDIO_DEFAULT_FULL_ENABLED = False
@@ -323,9 +489,16 @@ class GlobalSetting(QWidget):
     MUX_SETTING_KEEP_LOG_FILE = False
     MUX_SETTING_ADD_CRC = False
     MUX_SETTING_REMOVE_OLD_CRC = False
+    MUX_SETTING_SET_TITLE_TO_FILE_NAME = False
+    MUX_SETTING_DISCARD_ALL_TAGS = False
+    MUX_SETTING_STOP_AFTER_VIDEO_ENDS = False
+    MUX_SETTING_EXTRA_ARGUMENTS = ""
+    MUX_SETTING_OUTPUT_NAME_PATTERN = ""
+    MUX_SETTING_USED_OUTPUT_NAMES = set()
 
     DESTINATION_FOLDER_PATH = ""
     OVERWRITE_SOURCE_FILES = False
+    OVERWRITE_TEMP_FOLDER_PATH = ""
     RANDOM_OUTPUT_SUFFIX = ""
     USE_MKVPROPEDIT = False
 
