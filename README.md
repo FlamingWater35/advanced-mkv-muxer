@@ -110,9 +110,9 @@ _A preview of the application in action:_
 
 |     Type    |                                        Extensions                                       |
 |:-----------:|:---------------------------------------------------------------------------------------:|
-|   Video     | AVI, MKV, MP4, M4V, MOV, MPEG, TS, OGG, OGM, H264, H265, WEBM, WMV                       |
+|   Video     | AVI, MKV, MP4, M4V, MOV, MPEG, TS, OGG, OGM, H264, H265, WEBM, WMV                      |
 |  Subtitle   | ASS, SRT, SSA, SUP, PGS, MKS, VTT                                                       |
-|   Audio     | AAC, AC3, FLAC, EAC3, MKA, M4A, MP3, DTS, DTSMA, THD, WAV, OGG, OPUS                      |
+|   Audio     | AAC, AC3, FLAC, EAC3, MKA, M4A, MP3, DTS, DTSMA, THD, WAV, OGG, OPUS                    |
 |   Chapter   | XML                                                                                     |
 
 ## ⬇️Downloads
@@ -122,8 +122,8 @@ You can download it from the project's [releases&nbsp;page](https://github.com/F
 
 ### For Linux Users
 
-The deployed app available in downloads only support glibc 2.35 and above like: Ubuntu 22.04/up , Mint 21.2/up, Fedora 38/up and others [i can't test them all]
-Before starting the app, install the following libraries [not always needed as most of them included in the app]:
+The deployed app available in downloads only support glibc 2.35 and above like: Ubuntu 22.04/up , Mint 21.2/up, Fedora 38/up and others.
+Before starting the app, install the following libraries (not always needed as most of them included in the app):
 
 ```bash
 sudo apt-get install -y libpugixml-dev
@@ -140,8 +140,8 @@ sudo apt install libxcb-cursor0
 5. Just run `pip install -r requirements.txt`.
 6. Then run `python main.py` and you are all good.
 7. You may use `python3/pip3` instead of `python/pip` depending on your system.
-8. For linux users if you want to use another python version from the one that is already on your system it's recommended to use `pyenv`,if you didn't hear about it, you may read [this](https://askubuntu.com/a/1195153).
-9. Also, for linux users: as this app depends on mkvtoolnix it's very recommended to install it on your system before run the app from [here](https://mkvtoolnix.download/downloads.html).
+8. For Linux users if you want to use another python version from the one that is already on your system it's recommended to use `pyenv`,if you didn't hear about it, you may read [this](https://askubuntu.com/a/1195153).
+9. Also, for Linux users: as this app depends on mkvtoolnix it's very recommended to install it on your system before run the app from [here](https://mkvtoolnix.download/downloads.html).
 
 ### Updating The MKVmerge version
 
