@@ -178,9 +178,3 @@ The tests use a temporary profile under `tests/.tmp/`, so they do not touch your
 ## 🪪License
 
 [![GitHub](https://img.shields.io/github/license/FlamingWater35/advanced-mkv-muxer?style=for-the-badge)](https://github.com/FlamingWater35/advanced-mkv-muxer/blob/main/LICENSE)
-
-<div align="right">
-<table><td>
-<a href="#start-of-content">👆 Scroll to top</a>
-</td></table>
-</div>
