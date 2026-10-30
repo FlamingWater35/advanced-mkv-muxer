@@ -55,6 +55,7 @@ from packages.Tabs.MuxSetting.Widgets.JobOutputFiles import (
     is_relative_destination_folder,
     uses_relative_destination,
 )
+from packages.Tabs.MuxSetting.Widgets import JobOutputFiles
 from packages.Tabs.MuxSetting.Widgets.JobChangeDetection import job_has_nothing_to_do
 from packages.Tabs.MuxSetting.Widgets.OutputNamePattern import (
     apply_output_name_pattern,
@@ -359,6 +360,14 @@ class ExtraArgumentsTests(Batch5TestCase):
         self.assertEqual(split_extra_arguments("--output=x.mkv --keep-me"), ["--keep-me"])
         self.assertEqual(split_extra_arguments("   "), [])
 
+    def test_unbalanced_quote_does_not_abort_the_queue(self):
+        """A half typed quote is a normal state of the field, not a crash."""
+        self.assertEqual(split_extra_arguments('--no-date --title "My Movie'),
+                         ["--no-date", "--title", '"My', "Movie"])
+        self.assertEqual(split_extra_arguments("--no-date --title 'My Movie"),
+                         ["--no-date", "--title", "'My", "Movie"])
+        self.assertEqual(split_extra_arguments('-o out.mkv --title "x'), ["--title", '"x'])
+
     def test_extra_arguments_reach_the_job_json(self):
         movie = self.make_movie(self._work_dir / "library")
         GlobalSetting.DESTINATION_FOLDER_PATH = str(self._work_dir / "out")
@@ -401,6 +410,17 @@ class ExtraArgumentsTests(Batch5TestCase):
         self.assertTrue(job_has_nothing_to_do(job))
         GlobalSetting.MUX_SETTING_EXTRA_ARGUMENTS = "--no-date"
         self.assertFalse(job_has_nothing_to_do(job))
+
+    def test_output_name_pattern_skips_the_nothing_to_do_shortcut(self):
+        """A pattern renames the file, so the job is not a no-op (#111)."""
+        movie = self.make_movie(self._work_dir / "library")
+        GlobalSetting.OVERWRITE_SOURCE_FILES = True
+        job = self.make_job(movie)
+        self.assertTrue(job_has_nothing_to_do(job))
+        GlobalSetting.MUX_SETTING_OUTPUT_NAME_PATTERN = "renamed"
+        self.assertFalse(job_has_nothing_to_do(job))
+        GlobalSetting.MUX_SETTING_OUTPUT_NAME_PATTERN = "   "
+        self.assertTrue(job_has_nothing_to_do(job))
 
 
 class ChapterDelayTests(Batch5TestCase):
@@ -504,6 +524,50 @@ class OutputNamePatternTests(Batch5TestCase):
             job.custom_output_name = apply_output_name_pattern(job, "converted")
             names.append(make_output_name_unique(job))
         self.assertEqual(names, ["converted.mkv", "converted (2).mkv"])
+
+    def test_constant_pattern_does_not_collide_across_source_folders(self):
+        """An absolute destination puts every job in the same folder, so two
+        same-named episodes of different seasons must not overwrite each other."""
+        first_movie = self.make_movie(self._work_dir / "season1")
+        second_movie = self.make_movie(self._work_dir / "season2")
+        GlobalSetting.DESTINATION_FOLDER_PATH = str(self._work_dir / "out")
+        GlobalSetting.MUX_SETTING_USED_OUTPUT_NAMES = set()
+        jobs = [self.make_job(first_movie, queue_index=1),
+                self.make_job(second_movie, queue_index=2)]
+        for job in jobs:
+            job.custom_output_name = apply_output_name_pattern(job, "converted")
+            make_output_name_unique(job)
+        self.assertEqual([job.custom_output_name for job in jobs],
+                         ["converted.mkv", "converted (2).mkv"])
+        self.assertEqual(len({get_output_file_path(job) for job in jobs}), 2)
+
+    def test_relative_destination_still_uses_one_name_per_folder(self):
+        """The same name in two different output folders is not a collision."""
+        first_movie = self.make_movie(self._work_dir / "season1")
+        second_movie = self.make_movie(self._work_dir / "season2")
+        GlobalSetting.DESTINATION_FOLDER_PATH = ".\\converted"
+        GlobalSetting.MUX_SETTING_USED_OUTPUT_NAMES = set()
+        jobs = [self.make_job(first_movie, queue_index=1),
+                self.make_job(second_movie, queue_index=2)]
+        for job in jobs:
+            job.custom_output_name = apply_output_name_pattern(job, "converted")
+            make_output_name_unique(job)
+        self.assertEqual([job.custom_output_name for job in jobs],
+                         ["converted.mkv", "converted.mkv"])
+        self.assertEqual(len({get_output_file_path(job) for job in jobs}), 2)
+
+    def test_failed_job_records_the_path_the_muxer_wrote(self):
+        """record_failed_job_output() must match setup_output_video_command()."""
+        movie = self.make_movie(self._work_dir / "library")
+        job = self.make_job(movie)
+        job.custom_output_name = "converted.mkv"
+        GlobalSetting.DESTINATION_FOLDER_PATH = str(self._work_dir / "out")
+        expected = get_output_file_path(job)
+
+        recorded = JobOutputFiles.record_failed_job_output(job)
+
+        self.assertEqual(os.path.normcase(recorded), os.path.normcase(expected))
+        self.assertEqual(job.output_video_name, "converted.mkv")
 
     def test_muxing_honours_the_pattern(self):
         movie = self.make_movie(self._work_dir / "library", name="Show.S01E03.mkv")

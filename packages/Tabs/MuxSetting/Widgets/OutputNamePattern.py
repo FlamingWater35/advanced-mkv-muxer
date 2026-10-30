@@ -2,6 +2,7 @@ import os
 import re
 
 from packages.Tabs.GlobalSetting import GlobalSetting
+from packages.Tabs.MuxSetting.Widgets.JobOutputFiles import get_output_folder_path
 
 CRC_PLACEHOLDER = "%crc%"
 VIDEO_EXTENSION = ".mkv"
@@ -127,12 +128,17 @@ def make_output_name_unique(job):
     previous one, so a counter is appended instead. Names are registered in
     GlobalSetting.MUX_SETTING_USED_OUTPUT_NAMES, which the queue resets when a
     new run starts.
+
+    The key is the *output* folder, not the folder of the source file: with an
+    absolute destination every job of the queue writes into the same folder, so
+    two same-named episodes from different seasons collide there.
     """
     name = str(getattr(job, "custom_output_name", "")).strip()
     if name == "":
         return ""
     used_names = GlobalSetting.MUX_SETTING_USED_OUTPUT_NAMES
-    key = (os.path.normcase(os.path.dirname(job.video_name_absolute)), name.lower())
+    output_folder_path = os.path.normcase(os.path.abspath(get_output_folder_path(job)))
+    key = (output_folder_path, name.lower())
     if key not in used_names:
         used_names.add(key)
         return name

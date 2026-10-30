@@ -257,6 +257,11 @@ class StartMuxingWorker(QObject):
             self.next_job()
             return
         finalize_muxing_output(job)
+        if job.error_occurred:
+            # Replacing the source failed; the job must not be reported as done.
+            self.job_failed_signal.emit(self.current_job, get_output_size(job))
+            self.next_job()
+            return
         output_size = get_output_size(job)
         if job.is_crc_calculating_required:
             self.start_crc_calculating(job)

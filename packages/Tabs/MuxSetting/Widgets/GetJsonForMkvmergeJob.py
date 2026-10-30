@@ -43,9 +43,20 @@ def split_extra_arguments(text):
     are stripped afterwards, so `--title "My Movie"` becomes two arguments.
     Arguments that would move the output file are dropped, the app tracks the
     output path itself.
+
+    A half typed quote is a normal state of a text field the user is editing,
+    so it is tokenized by whitespace instead of raising: an exception here would
+    abort the whole queue (this runs while the job file is built).
     """
+    text = str(text or "")
+    try:
+        tokens = shlex.split(text, posix=False)
+    except ValueError:
+        # Unbalanced quotation: fall back to a plain whitespace split so the
+        # rest of the arguments still reach mkvmerge.
+        tokens = text.split()
     arguments = []
-    for token in shlex.split(str(text or ""), posix=False):
+    for token in tokens:
         if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'":
             token = token[1:-1]
         if token == "":

@@ -176,6 +176,47 @@ class OutputFinalizationTests(GlobalStateTestCase):
         self.assertFalse(renamed)
         self.assertLess(time.monotonic() - started, 1.0)
 
+    def test_a_failed_replace_restores_the_source_instead_of_losing_it(self):
+        """The source is moved aside, not deleted, so a failed move can undo it."""
+        GlobalSetting.OVERWRITE_SOURCE_FILES = True
+        GlobalSetting.RANDOM_OUTPUT_SUFFIX = "12345"
+        job, source = self.make_job()
+        # The muxer never produced its output: the replace must not lose the source.
+        job.output_video_absolute_path = ""
+
+        output_path = JobOutputFiles.finalize_muxing_output(job)
+
+        self.assertTrue(source.exists(), "the source file must survive a failed replace")
+        self.assertEqual(source.read_bytes(), b"source")
+        self.assertTrue(job.error_occurred)
+        self.assertEqual(os.path.normcase(output_path),
+                         os.path.normcase(JobOutputFiles.get_overwrite_temp_path(job)))
+        self.assertFalse(Path(str(source) + ".amkv-old").exists())
+
+    def test_a_successful_replace_removes_the_backup(self):
+        GlobalSetting.OVERWRITE_SOURCE_FILES = True
+        GlobalSetting.RANDOM_OUTPUT_SUFFIX = "12345"
+        job, source = self.make_job()
+        temporary_output = self._work_dir / JobOutputFiles.change_file_extension_to_mkv_with_random_suffix(
+            job.video_name)
+        temporary_output.write_bytes(b"muxed")
+
+        output_path = JobOutputFiles.finalize_muxing_output(job)
+
+        self.assertFalse(job.error_occurred)
+        self.assertEqual(Path(output_path).read_bytes(), b"muxed")
+        self.assertFalse(Path(str(source) + ".amkv-old").exists())
+
+    def test_replace_refuses_to_lose_the_source_when_the_output_is_missing(self):
+        source = self._work_dir / "original.mkv"
+        source.write_bytes(b"ORIGINAL")
+
+        replaced = JobOutputFiles.replace_source_with_output(
+            str(source), str(self._work_dir / "not_there.mkv"), str(source))
+
+        self.assertFalse(replaced)
+        self.assertEqual(source.read_bytes(), b"ORIGINAL")
+
 
 class CrcWorkerTests(GlobalStateTestCase):
     def run_crc_worker(self, file_path):

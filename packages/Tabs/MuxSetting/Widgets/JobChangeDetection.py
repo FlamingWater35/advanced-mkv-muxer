@@ -66,7 +66,10 @@ def has_container_instructions():
         int(GlobalSetting.CHAPTER_DELAY_MILLISECONDS) != 0 or
         GlobalSetting.MUX_SETTING_STOP_AFTER_VIDEO_ENDS or
         GlobalSetting.ATTACHMENT_AUTO_DETECT_FONTS or
-        str(GlobalSetting.MUX_SETTING_EXTRA_ARGUMENTS).strip() != ""
+        str(GlobalSetting.MUX_SETTING_EXTRA_ARGUMENTS).strip() != "" or
+        # An output name pattern renames the file even when nothing else
+        # changes, so it is a real instruction (#111).
+        str(GlobalSetting.MUX_SETTING_OUTPUT_NAME_PATTERN).strip() != ""
     )
 
 

@@ -229,15 +229,18 @@ def get_output_file_path(job):
 
 
 def get_written_output_path(job):
-    """Path of the file the muxer itself wrote, before any finalizing rename."""
+    """Path of the file the muxer itself wrote, before any finalizing rename.
+
+    This has to mirror setup_output_video_command() exactly, because it is used
+    to measure and report a job that failed: an output name pattern or a relay
+    folder changes where the tool was told to write, and a path that does not
+    exist would be reported as a 0 byte output.
+    """
     folder_path = get_output_folder_path(job)
     if GlobalSetting.OVERWRITE_SOURCE_FILES and not job.used_mkvpropedit:
-        file_name = change_file_extension_to_mkv_with_random_suffix(job.video_name)
-    else:
-        file_name = get_file_name_with_mkv_extension(job.video_name)
-        if uses_relative_destination(job):
-            file_name = os.path.basename(file_name)
-    return os.path.join(folder_path, file_name)
+        # Same path setup_output_video_command() passes as --output.
+        return get_overwrite_temp_path(job)
+    return os.path.join(folder_path, get_output_file_name(job))
 
 
 def record_failed_job_output(job):
@@ -252,6 +255,32 @@ def record_failed_job_output(job):
     return job.output_video_absolute_path
 
 
+def replace_source_with_output(source_path, new_path, final_path):
+    """Put the freshly muxed file over its source without ever losing the source.
+
+    os.rename() cannot overwrite an existing file on Windows, so the source has
+    to move out of the way first. It is moved to a sibling backup instead of
+    being deleted, and restored when the rename of the new file fails: a relay
+    folder on another drive makes that rename a real copy that can fail halfway
+    (#143).
+    """
+    if not os.path.exists(new_path):
+        write_to_log_file(f"Could not replace '{source_path}': '{new_path}' does not exist")
+        return False
+    backup_path = source_path + ".amkv-old"
+    if os.path.exists(backup_path):
+        # Left over from an interrupted run; it is not the source any more.
+        delete_file(backup_path)
+    if not rename_file(source_path, backup_path):
+        return False
+    if rename_file(new_path, final_path):
+        delete_file(backup_path)
+        return True
+    # The new file could not be moved: put the original back.
+    rename_file(backup_path, source_path)
+    return False
+
+
 def finalize_muxing_output(job):
     """Move the tool's output to its final name and record it on the job.
 
@@ -264,8 +293,13 @@ def finalize_muxing_output(job):
     if GlobalSetting.OVERWRITE_SOURCE_FILES and not job.used_mkvpropedit:
         # The muxer wrote "name#suffix.mkv" (in the relay folder when one is
         # configured); replace the original source file.
-        delete_file(job.video_name_absolute)
-        rename_file(get_overwrite_temp_path(job), final_path)
+        if not replace_source_with_output(job.video_name_absolute, get_overwrite_temp_path(job), final_path):
+            job.error_occurred = True
+            job.muxing_message = "Could not replace the source file with the muxed output"
+            # Report the partial output, not the source that was just restored.
+            job.output_video_name = os.path.basename(get_overwrite_temp_path(job))
+            job.output_video_absolute_path = get_overwrite_temp_path(job)
+            return job.output_video_absolute_path
     job.output_video_name = final_name
     job.output_video_absolute_path = final_path
     return final_path
