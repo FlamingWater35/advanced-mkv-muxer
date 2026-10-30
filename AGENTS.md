@@ -74,9 +74,11 @@ python scripts/build_windows.py --skip-deps --smoke-test --clean
   needs Inno Setup 6.3+ (`ISCC.exe`, auto-detected or `--iscc`); it installs
   per user into `%LOCALAPPDATA%\Programs\Advanced MKV Muxer` with no UAC.
 - Bundled data is added with `--include-data-dir` for `Resources/{Fonts,Icons,
-  Languages,DLL}`. The two MKVToolNix `.exe` files must use
-  `--include-data-files`, because `--include-data-dir` silently skips
-  executables (Nuitka treats them as code).
+  Languages,DLL}`. Files that `--include-data-dir` silently skips (it treats
+  them as code) must be added with `--include-data-files` instead: the Windows
+  MKVToolNix `.exe` files, and `Resources/Tools/Linux/lib/*` on Linux, where
+  the bundled tools link against those `.so` files. Omitting the Linux
+  libraries makes the shipped build die at start-up with a SIGSEGV.
 - CI (`.github/workflows/release.yml`) builds four assets — Windows portable,
   Windows installer, Linux tarball, Linux AppImage — for a tag `v*`/`[0-9]*`
   that is reachable from `main`, then creates a **draft** release. Linux
@@ -158,9 +160,12 @@ Progress and errors are parsed from the tool log by the
 
 - **`GlobalFiles` has import-time side effects.** Importing anything under
   `packages/` creates the app-data folders, clears the MediaInfo cache, locates
-  `mkvmerge`/`mkvpropedit`, and queries their versions. A missing tool raises
-  and shows `MissingFilesMessage`. This is why tests set up the environment
-  before importing and why `sys.argv[0]` matters.
+  `mkvmerge`/`mkvpropedit`, and queries their versions. A missing tool is
+  recorded in `GlobalFiles.StartupError` instead of raising, because a
+  `QMessageBox` cannot be built before `QApplication` exists; `main.py` calls
+  `GlobalFiles.show_startup_error_if_any()` right after creating the
+  application to show `MissingFilesMessage`. This is why tests set up the
+  environment before importing and why `sys.argv[0]` matters.
 - Tool lookup order: `%APPDATA%\Advanced MKV Muxer\Tools\<Platform>` (written by
   the in-app updater) when both binaries exist → `Resources/Tools/<Platform>`
   → `PATH`. `refresh_tools()` re-resolves and re-queries after an update.

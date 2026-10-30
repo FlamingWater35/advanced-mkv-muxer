@@ -210,6 +210,10 @@ def refresh_tools():
         logging.info("mkvpropedit OK")
 
 
+# Set when the bundled or system tools cannot be used. It is reported by
+# show_startup_error_if_any() once a QApplication exists.
+StartupError = None
+
 try:
     MyFontPath = os.path.join(os.path.abspath(FontFolderPath), 'OpenSans.ttf')
     WarningCheckBigIconPath = os.path.join(os.path.abspath(IconFolderPath), 'WarningCheckBig.png')
@@ -275,6 +279,20 @@ try:
     TaskBarLibFilePath = os.path.join(os.path.abspath(DLLFolderPath), "TaskbarLib.tlb")
     refresh_tools()
 except Exception as e:
+    # A QWidget (QMessageBox) cannot be built before QApplication exists, so
+    # the error is only recorded here. Creating the dialog at this point used
+    # to dereference the still-missing application instance and crash the
+    # process with SIGSEGV instead of showing a message.
     logging.error(e)
-    missing_files_message = MissingFilesMessage(error_message=str(e))
+    StartupError = e
+
+
+def show_startup_error_if_any():
+    """Show the deferred start-up error, if there was one.
+
+    Must be called after the QApplication exists (see main.py).
+    """
+    if StartupError is None:
+        return
+    missing_files_message = MissingFilesMessage(error_message=str(StartupError))
     missing_files_message.execute()

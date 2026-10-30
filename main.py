@@ -42,6 +42,9 @@ def create_application():
     global app
     app = MainApplication
     app.setWindowIcon(GlobalIcons.AppIcon)
+    # GlobalFiles can only record a start-up failure at import time, because a
+    # QMessageBox needs the QApplication that is created right above.
+    GlobalFiles.show_startup_error_if_any()
 
 
 def create_window():

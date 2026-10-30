@@ -186,6 +186,10 @@ jobs:
             "--include-data-dir=Resources/Icons=Resources/Icons"
             "--include-data-dir=Resources/Languages=Resources/Languages"
             "--include-data-dir=Resources/Tools/Linux=Resources/Tools/Linux"
+            # --include-data-dir also skips shared libraries (*.so and *.so.N),
+            # and the bundled mkvmerge/mkvpropedit link against the ones in
+            # "lib", so they are added explicitly like the Windows *.exe files.
+            "--include-data-files=Resources/Tools/Linux/lib/*=Resources/Tools/Linux/lib/"
             # The taskbar integration is Windows-only and imports comtypes,
             # which does not exist on Linux.
             "--nofollow-import-to=comtypes"
@@ -196,6 +200,26 @@ jobs:
           )
           python -m nuitka "${args[@]}" main.py
           find build/linux -maxdepth 1 -mindepth 1 | sort
+
+          # The bundled tools only start with their libraries next to them, and
+          # Nuitka skips shared libraries unless they are listed explicitly.
+          dist_dir="$(find build/linux -maxdepth 1 -type d -name '*.dist' -print -quit)"
+          bundled_lib="${dist_dir}/Resources/Tools/Linux/lib"
+          if [ ! -d "$bundled_lib" ]; then
+            echo "::error::The build is missing ${bundled_lib}; the bundled MKVToolNix tools cannot start."
+            exit 1
+          fi
+          missing=""
+          for library in Resources/Tools/Linux/lib/*; do
+            if [ ! -f "${bundled_lib}/$(basename "$library")" ]; then
+              missing="${missing} $(basename "$library")"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::The build is missing bundled libraries:${missing}"
+            exit 1
+          fi
+          echo "Bundled $(ls -1 "$bundled_lib" | wc -l) MKVToolNix libraries."
 
       - name: Build the Windows artifacts
         if: runner.os == 'Windows'
