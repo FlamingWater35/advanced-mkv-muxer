@@ -1,6 +1,7 @@
 import hashlib
 import json
 import shutil
+import ssl
 import tempfile
 import unittest
 import zipfile
@@ -80,6 +81,27 @@ class ReleaseLookupTests(unittest.TestCase):
             updater.latest_version(fetch_text=fetch)
         self.assertIn("network down", str(context.exception))
 
+    def test_certificate_failure_gets_an_actionable_hint(self):
+        def fetch(url):
+            raise ssl.SSLCertVerificationError(
+                "certificate verify failed: unable to get local issuer certificate (_ssl.c:1010)"
+            )
+
+        with self.assertRaises(UpdateError) as context:
+            updater.latest_version(fetch_text=fetch)
+        message = str(context.exception)
+        self.assertIn("ca-certificates", message)
+        # The hint is added once, not once per probed URL.
+        self.assertEqual(message.count("ca-certificates"), 1)
+
+    def test_plain_network_errors_get_no_certificate_hint(self):
+        def fetch(url):
+            raise OSError("network down")
+
+        with self.assertRaises(UpdateError) as context:
+            updater.latest_version(fetch_text=fetch)
+        self.assertNotIn("ca-certificates", str(context.exception))
+
     def test_check_for_update_detects_newer_release(self):
         status = updater.check_for_update("81.0", fetch_text=lambda url: DOWNLOADS_PAGE)
         self.assertEqual(status, UpdateStatus(current="81.0", latest="103.0", update_available=True))
@@ -127,6 +149,115 @@ class ChecksumTests(unittest.TestCase):
         self.assertEqual(updater.parse_checksum(text, "mkvtoolnix-64-bit-103.0.zip"), "abc123")
         self.assertEqual(updater.parse_checksum(text, "mkvtoolnix-32-bit-103.0.zip"), "def456")
         self.assertIsNone(updater.parse_checksum(text, "unknown.zip"))
+
+
+class SslContextTests(unittest.TestCase):
+    """A frozen Linux build must still verify HTTPS certificates.
+
+    The bundled OpenSSL can name a certificate file that only existed on the
+    build machine, so ``ssl.create_default_context()`` ends up with an empty
+    trust store and every request dies with "unable to get local issuer
+    certificate". The updater therefore falls back to a system CA bundle.
+    """
+
+    def test_default_context_verifies_certificates(self):
+        context = updater.create_ssl_context()
+        self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertTrue(context.check_hostname)
+
+    def test_existing_ssl_path_is_preferred(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle = Path(temporary) / "ca.pem"
+            bundle.write_text("cert", encoding="utf-8")
+            paths = ssl.get_default_verify_paths()._replace(cafile=str(bundle))
+            with mock.patch.object(updater.ssl, "get_default_verify_paths", return_value=paths):
+                self.assertEqual(updater.default_ca_bundle_path(), str(bundle))
+
+    def test_missing_ssl_path_falls_back_to_well_known_locations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            bundle = Path(temporary) / "ca-certificates.crt"
+            bundle.write_text("cert", encoding="utf-8")
+            paths = ssl.get_default_verify_paths()._replace(cafile=None, openssl_cafile=None)
+            with mock.patch.object(updater.ssl, "get_default_verify_paths", return_value=paths), \
+                    mock.patch.object(updater, "CA_BUNDLE_FILE_PATHS", (str(bundle),)):
+                self.assertEqual(updater.default_ca_bundle_path(), str(bundle))
+
+    def test_no_bundle_anywhere_returns_none(self):
+        paths = ssl.get_default_verify_paths()._replace(cafile=None, openssl_cafile=None, capath=None)
+        with mock.patch.object(updater.ssl, "get_default_verify_paths", return_value=paths), \
+                mock.patch.object(updater, "CA_BUNDLE_FILE_PATHS", ()), \
+                mock.patch.object(updater, "CA_BUNDLE_DIRECTORY_PATHS", ()):
+            self.assertIsNone(updater.default_ca_bundle_path())
+            self.assertIsNone(updater.default_ca_bundle_directory())
+
+    def test_empty_trust_store_loads_the_system_bundle(self):
+        context = mock.MagicMock()
+        context.cert_store_stats.return_value = {"x509": 0, "x509_ca": 0}
+        with mock.patch.object(updater.ssl, "create_default_context", return_value=context), \
+                mock.patch.object(updater, "default_ca_bundle_path", return_value="/etc/ssl/certs/ca-certificates.crt"), \
+                mock.patch.object(updater, "default_ca_bundle_directory", return_value=None):
+            self.assertIs(updater.create_ssl_context(), context)
+        context.load_verify_locations.assert_called_once_with(
+            cafile="/etc/ssl/certs/ca-certificates.crt",
+            capath=None,
+        )
+
+    def test_populated_trust_store_is_left_untouched(self):
+        context = mock.MagicMock()
+        context.cert_store_stats.return_value = {"x509": 51, "x509_ca": 49}
+        with mock.patch.object(updater.ssl, "create_default_context", return_value=context), \
+                mock.patch.object(updater, "default_ca_bundle_path", return_value="/etc/ssl/certs/ca-certificates.crt"):
+            updater.create_ssl_context()
+        context.load_verify_locations.assert_not_called()
+
+    def test_fetch_and_download_pass_the_context_to_urlopen(self):
+        calls = []
+
+        class FakeHeaders(dict):
+            def get_content_charset(self):
+                return None
+
+        class FakeResponse:
+            headers = FakeHeaders()
+
+            def __init__(self):
+                self._chunks = [b"body", b""]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc_info):
+                return False
+
+            def read(self, *_args):
+                return self._chunks.pop(0)
+
+        def fake_urlopen(request, timeout, context=None):
+            calls.append(context)
+            return FakeResponse()
+
+        marker = mock.MagicMock(name="context")
+        with mock.patch.object(updater, "urlopen", side_effect=fake_urlopen):
+            updater.fetch_url_text("https://example.invalid/page", context=marker)
+        self.assertEqual(calls, [marker])
+
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary) / "download.bin"
+            with mock.patch.object(updater, "urlopen", side_effect=fake_urlopen):
+                updater.download_file(
+                    "https://example.invalid/file.zip",
+                    destination,
+                    context=marker,
+                )
+            self.assertEqual(destination.read_bytes(), b"body")
+        self.assertEqual(calls, [marker, marker])
+
+    def test_urlopen_builds_a_context_when_none_is_given(self):
+        context = mock.MagicMock()
+        with mock.patch.object(updater, "create_ssl_context", return_value=context), \
+                mock.patch.object(updater.urllib.request, "urlopen") as raw_urlopen:
+            updater.urlopen(mock.MagicMock(), timeout=5)
+        self.assertIs(raw_urlopen.call_args.kwargs["context"], context)
 
 
 class WindowsArchiveTests(unittest.TestCase):

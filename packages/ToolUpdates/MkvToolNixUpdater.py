@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import ssl
 import struct
 import subprocess
 import sys
@@ -30,6 +31,24 @@ TAG_PATTERN = re.compile(r"release-(\d+(?:\.\d+)+)")
 
 WINDOWS_TOOL_NAMES = ("mkvmerge.exe", "mkvpropedit.exe")
 LINUX_TOOL_NAMES = ("mkvmerge", "mkvpropedit")
+
+# Well-known locations of a system CA bundle. A frozen (Nuitka) Linux build can
+# carry an OpenSSL whose compiled-in certificate directory points at the machine
+# that built it, so ``ssl.get_default_verify_paths()`` then names files that do
+# not exist on the machine running the application and every HTTPS request fails
+# with "unable to get local issuer certificate". Windows is unaffected because
+# its default context reads the system certificate store instead.
+CA_BUNDLE_FILE_PATHS = (
+    "/etc/ssl/certs/ca-certificates.crt",  # Debian, Ubuntu, Arch
+    "/etc/pki/tls/certs/ca-bundle.crt",  # Fedora, RHEL
+    "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",  # RHEL, CentOS
+    "/etc/ssl/ca-bundle.pem",  # openSUSE
+    "/etc/ssl/cert.pem",  # Alpine, FreeBSD
+)
+CA_BUNDLE_DIRECTORY_PATHS = (
+    "/etc/ssl/certs",
+    "/etc/pki/tls/certs",
+)
 
 
 class UpdateError(Exception):
@@ -101,11 +120,95 @@ def version_from_codeberg_tags(payload: str) -> str | None:
     return max(versions, key=version_key) if versions else None
 
 
-def fetch_url_text(url: str, timeout: int = 30) -> str:
+def default_ca_bundle_path() -> str | None:
+    """Return a CA bundle that exists on this machine, or ``None``.
+
+    The value reported by :mod:`ssl` is preferred, but in a frozen Linux build
+    it can point at a build machine's path. The well-known locations are checked
+    as a fallback so a system bundle is still found.
+    """
+    try:
+        paths = ssl.get_default_verify_paths()
+    except Exception:  # noqa: BLE001 - probing must never break the caller
+        paths = None
+    if paths is not None:
+        for candidate in (paths.cafile, paths.openssl_cafile):
+            if candidate and os.path.isfile(candidate):
+                return candidate
+    for candidate in CA_BUNDLE_FILE_PATHS:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def default_ca_bundle_directory() -> str | None:
+    """Return a directory of hashed CA certificates that exists, or ``None``."""
+    try:
+        paths = ssl.get_default_verify_paths()
+    except Exception:  # noqa: BLE001 - probing must never break the caller
+        paths = None
+    if paths is not None and paths.capath and os.path.isdir(paths.capath):
+        return paths.capath
+    for candidate in CA_BUNDLE_DIRECTORY_PATHS:
+        if os.path.isdir(candidate):
+            return candidate
+    return None
+
+
+def create_ssl_context() -> ssl.SSLContext:
+    """Build an SSL context that can verify certificates on this machine.
+
+    ``ssl.create_default_context()`` is used first because on Windows it reads
+    the system certificate store. When its trust store is empty — the usual
+    situation in a frozen Linux build whose OpenSSL was compiled with paths from
+    another machine — a bundle found on disk is loaded instead. The result is
+    never a context that silently accepts untrusted certificates.
+    """
+    context = ssl.create_default_context()
+    try:
+        has_certificates = context.cert_store_stats().get("x509_ca", 0) > 0
+    except Exception:  # noqa: BLE001 - older or unusual OpenSSL builds
+        has_certificates = False
+    if has_certificates:
+        return context
+
+    cafile = default_ca_bundle_path()
+    capath = default_ca_bundle_directory()
+    if cafile or capath:
+        try:
+            context.load_verify_locations(cafile=cafile, capath=capath)
+        except (OSError, ssl.SSLError):
+            pass
+    return context
+
+
+def urlopen(request: urllib.request.Request, timeout: int, context: ssl.SSLContext | None = None):
+    """Open ``request`` with an SSL context that works in frozen builds.
+
+    A caller-supplied ``context`` wins, so the network access stays injectable
+    for the tests.
+    """
+    if context is None:
+        context = create_ssl_context()
+    return urllib.request.urlopen(request, timeout=timeout, context=context)
+
+
+def fetch_url_text(url: str, timeout: int = 30, context: ssl.SSLContext | None = None) -> str:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    with urlopen(request, timeout=timeout, context=context) as response:
         charset = response.headers.get_content_charset() or "utf-8"
         return response.read().decode(charset, "replace")
+
+
+def _certificate_hint(exception: BaseException) -> str:
+    """Return a short, actionable hint for a TLS verification failure."""
+    if isinstance(exception, ssl.SSLCertVerificationError) or "CERTIFICATE_VERIFY_FAILED" in str(exception):
+        return (
+            "The system's CA certificates could not be used to verify the connection. "
+            "Install the 'ca-certificates' package (or point SSL_CERT_FILE at a CA bundle) "
+            "and try again."
+        )
+    return ""
 
 
 def latest_version(fetch_text=fetch_url_text) -> str:
@@ -123,6 +226,9 @@ def latest_version(fetch_text=fetch_url_text) -> str:
             found = parser(fetch_text(url))
         except Exception as exception:  # noqa: BLE001 - reported to the user
             problems.append(f"{url}: {exception}")
+            hint = _certificate_hint(exception)
+            if hint and hint not in problems:
+                problems.append(hint)
             continue
         if found:
             return found
@@ -173,11 +279,12 @@ def release_for_platform(version: str, system: str | None = None, bits: int | No
 # Download and verification
 # ---------------------------------------------------------------------------
 
-def download_file(url: str, destination: Path, progress=None, timeout: int = 120) -> Path:
+def download_file(url: str, destination: Path, progress=None, timeout: int = 120,
+                  context: ssl.SSLContext | None = None) -> Path:
     """Download ``url`` to ``destination``; ``progress`` gets (done, total)."""
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     destination = Path(destination)
-    with urllib.request.urlopen(request, timeout=timeout) as response, destination.open("wb") as handle:
+    with urlopen(request, timeout=timeout, context=context) as response, destination.open("wb") as handle:
         total = int(response.headers.get("Content-Length") or 0)
         done = 0
         while True:

@@ -1,3 +1,4 @@
+import importlib.machinery
 import subprocess
 import sys
 import unittest
@@ -35,6 +36,35 @@ class DependencyTests(unittest.TestCase):
         self.assertTrue(PySide6.__version__)
         self.assertTrue(psutil.__version__)
         self.assertTrue(comtypes.__version__)
+
+    def test_shiboken6_is_a_real_package_and_not_a_namespace_package(self):
+        """Guards the start-up crash caused by an incomplete shiboken6 install.
+
+        ``libshiboken``'s ``signature_bootstrap`` does
+        ``Path(shiboken6.__file__).resolve().parent / "files.dir"``. When
+        ``shiboken6/__init__.py`` is missing, Python treats the directory as an
+        implicit namespace package, ``__file__`` is None, and the process dies
+        with "argument should be a str or an os.PathLike object where
+        __fspath__ returns a str, not 'NoneType'" followed by a fatal
+        "libshiboken/signature: could not initialize part 2".
+        """
+        import shiboken6
+
+        self.assertIsNotNone(
+            shiboken6.__file__,
+            "shiboken6 is being imported as a namespace package, which means "
+            "shiboken6/__init__.py is missing from the environment. Reinstall "
+            "the pinned PySide6 to repair it.",
+        )
+        self.assertFalse(
+            isinstance(shiboken6.__spec__.loader, importlib.machinery.NamespaceLoader),
+            "shiboken6 must be a regular package, not a namespace package.",
+        )
+
+    def test_shiboken6_reports_a_version(self):
+        import shiboken6
+
+        self.assertTrue(shiboken6.__version__)
 
     def test_pip_reports_no_broken_requirements(self):
         result = subprocess.run(
