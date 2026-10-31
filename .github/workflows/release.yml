@@ -31,7 +31,7 @@ env:
   APP_SLUG: Advanced-MKV-Muxer
   PYTHON_VERSION: "3.12"
   # Pinned so an old tag can be rebuilt with the exact same compiler version.
-  NUITKA_VERSION: "4.3.1"
+  NUITKA_VERSION: "4.3.3"
 
 jobs:
   prepare:
@@ -111,7 +111,8 @@ jobs:
             platform: windows
             variant: installer
           # Ubuntu 22.04 is the oldest image GitHub provides that still has
-          # the glibc 2.35 baseline advertised in the README.
+          # the glibc 2.35 baseline advertised in the README. PySide6 6.12
+          # ships manylinux_2_34 wheels, so this runner satisfies it.
           - os: ubuntu-22.04
             platform: linux
             variant: tarball
@@ -145,7 +146,8 @@ jobs:
           python -m pip install --upgrade pip
           if [ "$RUNNER_OS" = "Linux" ]; then
             # comtypes is Windows-only, so install the same requirements.txt
-            # without it. Ubuntu 22.04 still supports Qt 6.6.
+            # without it. PySide6 6.12 needs glibc 2.34 (manylinux_2_34), which
+            # the Ubuntu 22.04 runner provides (glibc 2.35).
             grep -v -i '^[[:space:]]*comtypes' requirements.txt > "${RUNNER_TEMP}/requirements-linux.txt"
             python -m pip install -r "${RUNNER_TEMP}/requirements-linux.txt"
           else
@@ -220,6 +222,69 @@ jobs:
             exit 1
           fi
           echo "Bundled $(ls -1 "$bundled_lib" | wc -l) MKVToolNix libraries."
+
+      - name: Smoke test the Linux build
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          dist_dir="$(find build/linux -maxdepth 1 -type d -name '*.dist' -print -quit)"
+          binary="${dist_dir}/${APP_SLUG}"
+
+          # Start the built application for real. A start-up crash happens
+          # while the interpreter loads its extensions, well before Qt picks a
+          # platform plugin, so the offscreen platform is enough and no display
+          # server is needed. This is the check that was missing when PySide6
+          # 6.6.x shipped a Linux build that died with SIGSEGV on every start.
+          #
+          # HOME is redirected so the run gets a clean profile and the files the
+          # application writes on start-up can be inspected afterwards.
+          smoke_home="$(mktemp -d)"
+          set +e
+          HOME="$smoke_home" XDG_DATA_HOME="$smoke_home/.local/share" \
+            QT_QPA_PLATFORM=offscreen timeout 30 "$binary" > smoke.log 2>&1
+          status=$?
+          set -e
+
+          cat smoke.log || true
+
+          # Nuitka prints this banner from its SIGSEGV handler. The handler runs
+          # before the process dies, so check the text as well as the status.
+          if grep -qi "segmentation fault has occurred" smoke.log; then
+            echo "::error::The Linux build reported a segmentation fault at start-up."
+            exit 1
+          fi
+          if grep -q "Traceback (most recent call last)" smoke.log; then
+            echo "::error::The Linux build raised an exception at start-up."
+            exit 1
+          fi
+          if [ "$status" -ge 128 ]; then
+            echo "::error::The Linux build was killed by signal $((status - 128))."
+            exit 1
+          fi
+
+          # Positive evidence that the application really initialised: the
+          # profile folder and setting.json are only written once GlobalFiles
+          # and Options have imported and the QApplication exists.
+          profile="$smoke_home/.local/share/Advanced MKV Muxer"
+          if [ ! -f "${profile}/setting.json" ]; then
+            echo "::error::The Linux build never wrote its profile (setting.json); it did not finish start-up."
+            ls -laR "$smoke_home" || true
+            exit 1
+          fi
+          echo "Start-up reached profile creation: ${profile}/setting.json exists."
+
+          if [ "$status" -eq 124 ]; then
+            # The timeout fired, so the application was still running its
+            # event loop: the healthy outcome for a GUI program.
+            echo "Smoke test passed: the application started and kept running."
+            exit 0
+          fi
+          if [ "$status" -eq 0 ]; then
+            echo "Smoke test passed: the application started and exited cleanly."
+            exit 0
+          fi
+          echo "::error::The Linux build exited during start-up (status ${status})."
+          exit 1
 
       - name: Build the Windows artifacts
         if: runner.os == 'Windows'

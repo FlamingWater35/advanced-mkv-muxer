@@ -38,7 +38,7 @@ from pathlib import Path
 
 APP_NAME = "Advanced MKV Muxer"
 APP_SLUG = "Advanced-MKV-Muxer"
-DEFAULT_NUITKA_VERSION = "4.3.1"
+DEFAULT_NUITKA_VERSION = "4.3.3"
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "packages" / "Startup" / "Version.py"

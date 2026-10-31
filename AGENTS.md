@@ -11,9 +11,12 @@ video files with subtitles, audio tracks, chapters and attachments through
 
 - Entry point: `main.py` → `MainApplication` (one `QApplication`) → `MainWindow`
   (Windows) or `MainWindowNonWindowsSystem` (Linux).
-- Python **3.12** (enforced by the test suite), PySide6 **6.6.1**, psutil, and
+- Python **3.12** (enforced by the test suite), PySide6 **6.12.0**, psutil, and
   comtypes (Windows only). The legacy 32-bit/PySide2 variant lives on the
-  `develop-PySide2` branch.
+  `develop-PySide2` branch. PySide6 6.7.1 or newer is a hard floor: earlier
+  releases (including the whole 6.6 series) crash on Linux at start-up with
+  SIGSEGV because `libshiboken` imports the CPython test module `xxsubtype`,
+  which a Nuitka standalone build does not ship (PYSIDE-2747).
 - Supported targets: Windows (release builds are x64) and Linux; macOS is not a
   supported target.
 - License: GPL-2.0 (`LICENSE`). Preserve the upstream attribution and credits
@@ -70,7 +73,7 @@ python scripts/build_windows.py --skip-deps --smoke-test --clean
 - Outputs land in `dist/`:
   `Advanced-MKV-Muxer-<version>-windows-x64-portable.exe` and
   `...-windows-x64-setup.exe`.
-- Nuitka is pinned to `4.3.1` in the script and the workflow. The installer
+- Nuitka is pinned to `4.3.3` in the script and the workflow. The installer
   needs Inno Setup 6.3+ (`ISCC.exe`, auto-detected or `--iscc`); it installs
   per user into `%LOCALAPPDATA%\Programs\Advanced MKV Muxer` with no UAC.
 - Bundled data is added with `--include-data-dir` for `Resources/{Fonts,Icons,

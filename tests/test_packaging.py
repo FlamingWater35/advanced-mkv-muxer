@@ -1,5 +1,6 @@
 """Regression tests for the Linux packaging argument and the deferred start-up error."""
 
+import re
 import unittest
 from unittest import mock
 
@@ -38,6 +39,40 @@ class LinuxPackagingTests(unittest.TestCase):
         script = (ROOT / "scripts" / "build_windows.py").read_text(encoding="utf-8")
         self.assertIn("--include-data-files={TOOLS_DIR}/mkvmerge.exe", script)
         self.assertIn("--include-data-files={TOOLS_DIR}/mkvpropedit.exe", script)
+
+
+class LinuxStartupRegressionTests(unittest.TestCase):
+    """Guards for the PySide6 SIGSEGV that broke every Linux build.
+
+    ``libshiboken`` in PySide6 up to 6.7.0 imports the CPython *test* module
+    ``xxsubtype`` while initialising. On Linux that module is a shared object
+    Nuitka never bundles, so the import fails, the leftover exception makes
+    ``PyType_FromSpecWithBases`` return NULL, and ``Shiboken::init()`` passes
+    that NULL to ``PyType_Ready`` -> SIGSEGV before Qt even loads (PYSIDE-2747).
+    Windows is unaffected because ``xxsubtype`` is a builtin there.
+    """
+
+    def setUp(self):
+        self.workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        self.requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+    def test_pyside6_is_new_enough_to_carry_the_upstream_fix(self):
+        match = re.search(r"^PySide6==(\d+)\.(\d+)\.", self.requirements, re.MULTILINE)
+        self.assertIsNotNone(match, "requirements.txt must pin PySide6")
+        major, minor = int(match.group(1)), int(match.group(2))
+        self.assertGreaterEqual(
+            (major, minor), (6, 7),
+            "PySide6 6.6.x and 6.7.0 import the CPython test module 'xxsubtype' "
+            "from libshiboken; the Linux Nuitka build then segfaults at start-up.",
+        )
+
+    def test_ci_starts_the_linux_build_instead_of_only_inspecting_it(self):
+        # A static "test -x" check cannot catch a start-up crash.
+        self.assertIn("Smoke test the Linux build", self.workflow)
+        self.assertIn("segmentation fault has occurred", self.workflow)
+
+    def test_ci_smoke_test_verifies_the_profile_was_written(self):
+        self.assertIn("setting.json", self.workflow)
 
 
 class DeferredStartupErrorTests(unittest.TestCase):

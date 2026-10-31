@@ -134,7 +134,7 @@ sudo apt install libxcb-cursor0
 ### Using Python Code Version
 
 1. Clone the repository :`git clone https://github.com/FlamingWater35/advanced-mkv-muxer.git`.
-2. The main branch uses ``PySide6`` library on version `6.6.1`, tested on `Python 3.12`, and only supports x64 systems.
+2. The main branch uses ``PySide6`` library on version `6.12.0`, tested on `Python 3.12`, and only supports x64 systems.
 3. If you want to use on x32 systems you should switch to branch `develop-PySide2`: `git checkout develop-pyside2` which uses `PySide2 v5.14.0` and tested in `python 3.8.10`.
 4. After selecting the branch just make sure to use the mentioned python version as it's guaranteed to work perfect.
 5. Just run `pip install -r requirements.txt`.
