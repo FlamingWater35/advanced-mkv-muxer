@@ -11,6 +11,7 @@
 /MkvEnv32/
 /build/
 /dist/
+/.scratch/
 /Testing/test.py
 /Testing/
 *.pyc

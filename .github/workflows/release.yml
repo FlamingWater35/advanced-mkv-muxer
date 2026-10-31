@@ -404,6 +404,11 @@ jobs:
           pattern: ${{ env.APP_SLUG }}-*
           path: release-assets
           merge-multiple: true
+          # The artifacts are uploaded as single files (archive: false), so they
+          # must come back as single files. download-artifact decides to
+          # "extract" an artifact when its name ends in .zip, which turns the
+          # portable archive into a directory and makes the release step fail.
+          skip-decompress: true
 
       - name: Create the draft release
         env:
@@ -418,8 +423,25 @@ jobs:
 
           echo "Downloaded assets:"
           printf '  %s\n' "${assets[@]}"
-          if [ "${#assets[@]}" -ne 4 ]; then
-            echo "::error::Expected 4 assets, found ${#assets[@]}."
+
+          # Check the exact expected names instead of only the count: an asset
+          # that was extracted instead of downloaded shows up as a directory,
+          # and gh then fails with a confusing "is a directory" error.
+          expected=(
+            "${APP_SLUG}-${VERSION}-windows-x64-portable.zip"
+            "${APP_SLUG}-${VERSION}-windows-x64-setup.exe"
+            "${APP_SLUG}-${VERSION}-linux-x64.tar.gz"
+            "${APP_SLUG}-${VERSION}-linux-x64.AppImage"
+          )
+          for asset in "${expected[@]}"; do
+            if [ ! -f "release-assets/${asset}" ]; then
+              echo "::error::Expected the release asset '${asset}' to be a file."
+              ls -la release-assets
+              exit 1
+            fi
+          done
+          if [ "${#assets[@]}" -ne "${#expected[@]}" ]; then
+            echo "::error::Expected ${#expected[@]} assets, found ${#assets[@]}."
             exit 1
           fi
 

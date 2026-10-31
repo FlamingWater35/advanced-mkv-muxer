@@ -116,8 +116,23 @@ class PortablePackagingTests(unittest.TestCase):
         self.assertIn("windows-x64-portable.zip", self.workflow)
         self.assertNotIn("windows-x64-portable.exe", self.workflow)
 
-    def test_ci_still_expects_four_release_assets(self):
-        self.assertIn("Expected 4 assets", self.workflow)
+    def test_ci_downloads_the_artifacts_without_extracting_them(self):
+        # Regression: download-artifact@v8 treats an artifact whose name ends in
+        # ".zip" as a zip to extract, so the portable archive arrived as a
+        # directory and the release step died with
+        # "read release-assets/...-portable.zip: is a directory".
+        # skip-decompress is what keeps every artifact a single file.
+        self.assertIn("skip-decompress: true", self.workflow)
+
+    def test_ci_checks_each_expected_release_asset_by_name(self):
+        # A count alone does not notice that one "asset" became a directory.
+        for name in (
+            "windows-x64-portable.zip",
+            "windows-x64-setup.exe",
+            "linux-x64.tar.gz",
+            "linux-x64.AppImage",
+        ):
+            self.assertIn(f"-{name}", self.workflow)
 
 
 class PortableDataFolderTests(unittest.TestCase):
