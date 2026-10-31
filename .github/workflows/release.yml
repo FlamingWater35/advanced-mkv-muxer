@@ -4,7 +4,7 @@
 # A run starts when a version tag (``v2.4.2`` or ``2.4.2``) is pushed and the
 # tagged commit is reachable from ``main``. Four artifacts are produced:
 #
-#   windows/portable  - one self-contained executable (Nuitka --mode=onefile)
+#   windows/portable  - portable ZIP: standalone build + portable.flag marker
 #   windows/installer - Inno Setup installer around the standalone build
 #   linux/tarball     - the standalone build as a .tar.gz
 #   linux/appimage    - the standalone build wrapped in an AppImage
@@ -153,7 +153,7 @@ jobs:
           else
             python -m pip install -r requirements.txt
           fi
-          python -m pip install "Nuitka[onefile]==${NUITKA_VERSION}"
+          python -m pip install "Nuitka==${NUITKA_VERSION}"
 
       - name: Generate the AppImage icon
         if: matrix.variant == 'appimage'
@@ -359,7 +359,7 @@ jobs:
           set -euo pipefail
           case "${{ matrix.platform }}-${{ matrix.variant }}" in
             windows-portable)
-              path="dist/${APP_SLUG}-${VERSION}-windows-x64-portable.exe" ;;
+              path="dist/${APP_SLUG}-${VERSION}-windows-x64-portable.zip" ;;
             windows-installer)
               path="dist/${APP_SLUG}-${VERSION}-windows-x64-setup.exe" ;;
             linux-tarball)

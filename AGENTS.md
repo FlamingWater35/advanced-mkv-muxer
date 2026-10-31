@@ -65,14 +65,24 @@ Windows artifacts (must run on Windows):
 
 ```powershell
 python scripts/build_windows.py                      # portable + installer
-python scripts/build_windows.py --variant portable   # single .exe (Nuitka onefile)
+python scripts/build_windows.py --variant portable   # portable ZIP (Nuitka standalone + marker)
 python scripts/build_windows.py --variant installer  # Inno Setup installer
 python scripts/build_windows.py --skip-deps --smoke-test --clean
 ```
 
 - Outputs land in `dist/`:
-  `Advanced-MKV-Muxer-<version>-windows-x64-portable.exe` and
+  `Advanced-MKV-Muxer-<version>-windows-x64-portable.zip` (a self-contained
+  folder; unpack and run, no installation) and
   `...-windows-x64-setup.exe`.
+- The portable ZIP ships a `portable.flag` marker next to the executable. When
+  that marker is present the application keeps settings, logs and updated
+  MKVToolNix tools in a `Data` folder beside itself instead of `%APPDATA%`, so
+  the folder can be moved between machines with its configuration intact. The
+  installer omits the marker, so an installed copy still uses `%APPDATA%`.
+  `scripts/build_windows.py` and `packages/Startup/GlobalFiles.py` must agree on
+  the marker name; `tests/test_packaging.py` asserts that.
+- Both Windows variants wrap the same Nuitka `--mode=standalone` payload, which
+  is built once per invocation (`build/standalone/*.dist`).
 - Nuitka is pinned to `4.3.3` in the script and the workflow. The installer
   needs Inno Setup 6.3+ (`ISCC.exe`, auto-detected or `--iscc`); it installs
   per user into `%LOCALAPPDATA%\Programs\Advanced MKV Muxer` with no UAC.

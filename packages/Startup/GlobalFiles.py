@@ -8,16 +8,52 @@ from pathlib import Path
 
 from packages.Widgets.MissingFilesMessage import MissingFilesMessage
 
+# A portable copy ships this file next to the executable. Its presence means
+# settings, logs and updated tools belong beside the application instead of the
+# user profile, so the folder can be moved to another machine (or a USB stick)
+# with its configuration intact. scripts/build_windows.py writes the marker into
+# the portable archive and must agree on the name.
+PORTABLE_MARKER_FILE_NAME = "portable.flag"
+PORTABLE_DATA_FOLDER_NAME = "Data"
+
+
+def get_portable_data_folder(bundle_folder=None):
+    """Return the portable data folder, or ``None`` for a normal installation.
+
+    ``bundle_folder`` defaults to the folder holding the bundled resources,
+    which is also the folder holding the executable in a portable build. It is
+    a parameter so this can be tested without a real portable archive.
+    """
+    if bundle_folder is None:
+        bundle_folder = get_bundle_folder()
+    marker = os.path.join(os.path.abspath(bundle_folder), PORTABLE_MARKER_FILE_NAME)
+    if os.path.isfile(marker):
+        return os.path.join(os.path.abspath(bundle_folder), PORTABLE_DATA_FOLDER_NAME)
+    return None
+
 
 def create_app_data_folder():
     """
         Returns a parent directory path
         where persistent application data can be stored.
 
+        A portable copy (see PORTABLE_MARKER_FILE_NAME) keeps everything in its
+        own "Data" folder instead, and falls back to the per-user location when
+        that folder cannot be created (for example on a read-only medium).
+
         # linux: ~/.local/share
         # macOS: ~/Library/Application Support
         # windows: C:/Users/<USER>/AppData/Roaming
         """
+    portable_folder = get_portable_data_folder()
+    if portable_folder is not None:
+        try:
+            os.makedirs(portable_folder, exist_ok=True)
+            return Path(portable_folder)
+        except OSError as e:
+            logging.warning("Could not create the portable data folder %s (%s); "
+                            "falling back to the user profile.", portable_folder, e)
+
     home = Path.home()
     app_data = ""
     if sys.platform == "win32":

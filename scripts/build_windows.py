@@ -3,10 +3,13 @@
 
 Outputs (in ``dist/`` by default):
 
-* ``Advanced-MKV-Muxer-<version>-windows-x64-portable.exe``
-  Nuitka ``--mode=onefile`` build; no installation needed.
+* ``Advanced-MKV-Muxer-<version>-windows-x64-portable.zip``
+  A self-contained folder: the Nuitka ``--mode=standalone`` build plus a
+  ``portable.flag`` marker. Unpack it anywhere and run the executable; settings,
+  logs and updated MKVToolNix tools stay in a ``Data`` folder inside it, so the
+  folder can be moved between machines with its configuration intact.
 * ``Advanced-MKV-Muxer-<version>-windows-x64-setup.exe``
-  Inno Setup installer wrapping the Nuitka ``--mode=standalone`` build.
+  Inno Setup installer wrapping the same standalone build.
 
 The installer is installed per user, below
 ``%LOCALAPPDATA%\\Programs\\Advanced MKV Muxer`` (no administrator rights and
@@ -34,11 +37,29 @@ import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 APP_NAME = "Advanced MKV Muxer"
 APP_SLUG = "Advanced-MKV-Muxer"
 DEFAULT_NUITKA_VERSION = "4.3.3"
+
+# A portable copy carries this marker next to its executable, which tells the
+# application to keep its settings, logs and updated tools in a "Data" folder
+# beside the application instead of the user profile. The name must match
+# packages/Startup/GlobalFiles.PORTABLE_MARKER_FILE_NAME; tests/test_packaging.py
+# asserts the two agree. The build script does not import that module, because
+# importing it creates the app-data folder and probes for the bundled tools.
+PORTABLE_MARKER_FILE_NAME = "portable.flag"
+PORTABLE_MARKER_CONTENT = (
+    "This file marks a portable Advanced MKV Muxer copy.\r\n"
+    "\r\n"
+    "Settings, logs and updated MKVToolNix tools are stored in the 'Data'\r\n"
+    "folder next to this file, so the whole folder can be moved to another\r\n"
+    "machine or a USB stick with its configuration intact.\r\n"
+    "\r\n"
+    "Delete this file to keep the data in the user profile again.\r\n"
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "packages" / "Startup" / "Version.py"
@@ -99,7 +120,7 @@ def ensure_dependencies(args: argparse.Namespace) -> None:
 
     install_command = (
         f'{sys.executable} -m pip install -r requirements.txt '
-        f'"Nuitka[onefile]=={args.nuitka_version}"'
+        f'"Nuitka=={args.nuitka_version}"'
     )
     if args.skip_deps:
         raise SystemExit(
@@ -111,16 +132,22 @@ def ensure_dependencies(args: argparse.Namespace) -> None:
     log("Installing missing Python packages: " + ", ".join(missing))
     run([sys.executable, "-m", "pip", "install", "--upgrade", "pip"])
     run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
-    run([sys.executable, "-m", "pip", "install", f"Nuitka[onefile]=={args.nuitka_version}"])
+    run([sys.executable, "-m", "pip", "install", f"Nuitka=={args.nuitka_version}"])
 
 
-def nuitka_command(mode: str, output_dir: Path, version: str, *, remove_output: bool) -> list[str]:
+def nuitka_command(output_dir: Path, version: str) -> list[str]:
+    """Build the standalone payload that both Windows variants wrap.
+
+    ``--mode=standalone`` (not ``onefile``) is deliberate: a portable copy is a
+    real folder with its own ``Data`` directory, so there is nothing to unpack
+    into a temporary location at start-up.
+    """
     file_version = numeric_version(version)
     command = [
         sys.executable,
         "-m",
         "nuitka",
-        f"--mode={mode}",
+        "--mode=standalone",
         "--assume-yes-for-downloads",
         "--enable-plugin=pyside6",
         f"--output-dir={output_dir}",
@@ -142,44 +169,26 @@ def nuitka_command(mode: str, output_dir: Path, version: str, *, remove_output: 
         f"--include-data-files={TOOLS_DIR}/LICENSE={TOOLS_DIR}/LICENSE",
         f"--include-data-files={TOOLS_DIR}/README.md={TOOLS_DIR}/README.md",
     ]
-    if remove_output:
-        command.append("--remove-output")
     command.append("main.py")
     return command
 
 
-def pick_executable(output_dir: Path) -> Path:
-    for name in (f"{APP_SLUG}.exe", APP_SLUG, f"{APP_SLUG}.bin"):
-        candidate = output_dir / name
-        if candidate.is_file():
-            return candidate
-    candidates = sorted(path for path in output_dir.glob("*.exe") if path.is_file())
-    if len(candidates) == 1:
-        return candidates[0]
-    raise SystemExit(f"Could not find the Nuitka executable in {output_dir}")
+def build_standalone(args: argparse.Namespace, version: str) -> Path:
+    """Build the Nuitka standalone payload shared by both Windows variants.
 
+    The portable archive and the installer wrap the same folder, so it is built
+    at most once per invocation. It is never reused across invocations: a stale
+    payload from an earlier run would be shipped silently, and Nuitka stamps the
+    version into the executable it produces.
+    """
+    cached = getattr(args, "_standalone_payload", None)
+    if cached is not None:
+        print(f"Reusing the standalone payload built in this run: {cached}", flush=True)
+        return cached
 
-def build_portable(args: argparse.Namespace, version: str) -> Path:
-    output_dir = ROOT / "build" / "portable"
-    log("Building the portable executable (Nuitka --mode=onefile)")
-    run(nuitka_command("onefile", output_dir, version, remove_output=True))
-
-    binary = pick_executable(output_dir)
-    target = args.output_dir / f"{APP_SLUG}-{version}-windows-x64-portable.exe"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(binary, target)
-    require_size(target, minimum_mb=20)
-    print(f"Portable build: {target} ({size_of(target)})", flush=True)
-
-    if args.smoke_test:
-        smoke_test(target, args.smoke_timeout)
-    return target
-
-
-def build_installer(args: argparse.Namespace, version: str) -> Path:
-    output_dir = ROOT / "build" / "installer"
-    log("Building the standalone application for the installer (Nuitka --mode=standalone)")
-    run(nuitka_command("standalone", output_dir, version, remove_output=False))
+    output_dir = ROOT / "build" / "standalone"
+    log("Building the standalone payload (Nuitka --mode=standalone)")
+    run(nuitka_command(output_dir, version))
 
     payload_dirs = sorted(path for path in output_dir.glob("*.dist") if path.is_dir())
     if len(payload_dirs) != 1:
@@ -189,6 +198,7 @@ def build_installer(args: argparse.Namespace, version: str) -> Path:
     payload = payload_dirs[0]
 
     required = (
+        f"{APP_SLUG}.exe",
         f"{TOOLS_DIR}/mkvmerge.exe",
         f"{TOOLS_DIR}/mkvpropedit.exe",
         "Resources/Icons/App.ico",
@@ -198,7 +208,67 @@ def build_installer(args: argparse.Namespace, version: str) -> Path:
     for relative in required:
         if not (payload / relative).is_file():
             raise SystemExit(f"The standalone build is missing {relative!r} in {payload}")
-    print(f"Installer payload: {payload}", flush=True)
+    print(f"Standalone payload: {payload}", flush=True)
+    args._standalone_payload = payload
+    return payload
+
+
+def write_portable_marker(folder: Path) -> Path:
+    """Create the marker that switches the application to portable data storage."""
+    marker = folder / PORTABLE_MARKER_FILE_NAME
+    marker.write_text(PORTABLE_MARKER_CONTENT, encoding="utf-8")
+    return marker
+
+
+def build_portable(args: argparse.Namespace, version: str) -> Path:
+    payload = build_standalone(args, version)
+
+    # Stage the folder exactly as the user will see it after unpacking: the
+    # standalone payload plus the portable marker.
+    log("Packaging the portable archive")
+    staging = ROOT / "build" / "portable-staging"
+    shutil.rmtree(staging, ignore_errors=True)
+    root_name = f"{APP_SLUG}-{version}-windows-x64"
+    portable_folder = staging / root_name
+    portable_folder.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(payload, portable_folder)
+    write_portable_marker(portable_folder)
+
+    target = args.output_dir / f"{root_name}-portable.zip"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)
+    # make_archive adds the extension itself when given a base name.
+    archive = Path(
+        shutil.make_archive(
+            str(target.with_suffix("")),
+            "zip",
+            root_dir=str(staging),
+            base_dir=root_name,
+        )
+    )
+    if archive != target:
+        archive.replace(target)
+    require_size(target, minimum_mb=20)
+
+    if args.smoke_test:
+        # Run the smoke test on the archive's contents, not on the staging
+        # folder: the application would create its Data folder in whatever
+        # folder it is started from, and that must not end up in the release
+        # archive. This also verifies the exact bytes the user downloads.
+        extracted = ROOT / "build" / "portable-smoke"
+        shutil.rmtree(extracted, ignore_errors=True)
+        extracted.mkdir(parents=True)
+        with zipfile.ZipFile(target) as bundle:
+            bundle.extractall(extracted)
+        smoke_test(extracted / root_name / f"{APP_SLUG}.exe", args.smoke_timeout, expect_portable_data=True)
+        shutil.rmtree(extracted, ignore_errors=True)
+
+    print(f"Portable build: {target} ({size_of(target)})", flush=True)
+    return target
+
+
+def build_installer(args: argparse.Namespace, version: str) -> Path:
+    payload = build_standalone(args, version)
 
     if args.smoke_test:
         smoke_test(payload / f"{APP_SLUG}.exe", args.smoke_timeout)
@@ -325,11 +395,15 @@ def iscc_from_registry() -> list[Path]:
     return results
 
 
-def smoke_test(binary: Path, timeout: int) -> None:
+def smoke_test(binary: Path, timeout: int, *, expect_portable_data: bool = False) -> None:
     """Launch the built application and verify the resources it ships with.
 
     The normal Windows platform plugin is used (not the offscreen one, which
     breaks the taskbar integration), so a window may appear briefly.
+
+    With ``expect_portable_data`` the build is a portable copy, so the profile
+    is expected inside the application folder instead of the redirected
+    user profile.
     """
     log("Smoke test: starting the application (a window may appear briefly)")
     profile = ROOT / "build" / "smoke-profile"
@@ -354,7 +428,7 @@ def smoke_test(binary: Path, timeout: int) -> None:
 
     process = subprocess.Popen([str(binary)], cwd=str(binary.parent), env=environment)
     try:
-        resources = wait_for_resources(process, binary, temp_dir, timeout)
+        resources = wait_for_resources(process, binary, timeout)
         verify_bundled_tools(resources)
 
         # Let the GUI finish initialising; a crash here means the deployment is
@@ -369,6 +443,9 @@ def smoke_test(binary: Path, timeout: int) -> None:
                 "integration can make the application exit; run this from a normal desktop "
                 "session, or omit --smoke-test."
             )
+
+        if expect_portable_data:
+            verify_portable_data(binary.parent, appdata)
     finally:
         if process.poll() is None:
             process.terminate()
@@ -381,8 +458,33 @@ def smoke_test(binary: Path, timeout: int) -> None:
     log("Smoke test passed: bundled Resources and MKVToolNix binaries are usable")
 
 
-def wait_for_resources(process: subprocess.Popen, binary: Path, temp_dir: Path, timeout: int) -> Path:
-    """Return the folder holding Resources, waiting for a onefile extraction."""
+def verify_portable_data(application_folder: Path, profile_appdata: Path) -> None:
+    """Check that a portable copy keeps its data beside the executable."""
+    portable_data = application_folder / "Data"
+    if not portable_data.is_dir():
+        raise SystemExit(
+            f"Smoke test failed: the portable build did not create {portable_data}.\n"
+            f"The marker {PORTABLE_MARKER_FILE_NAME} must sit next to the executable."
+        )
+    for expected in ("setting.json", "Logs", "MediaInfo"):
+        if not (portable_data / expected).exists():
+            raise SystemExit(
+                f"Smoke test failed: the portable build did not create {portable_data / expected}"
+            )
+    if (profile_appdata / "Advanced MKV Muxer").exists():
+        raise SystemExit(
+            "Smoke test failed: the portable build wrote to the user profile "
+            f"({profile_appdata / 'Advanced MKV Muxer'}) instead of its own Data folder."
+        )
+    print(f"  Portable data: {portable_data}", flush=True)
+
+
+def wait_for_resources(process: subprocess.Popen, binary: Path, timeout: int) -> Path:
+    """Return the folder holding Resources.
+
+    Both Windows variants are standalone builds, so the bundled data always sits
+    next to the executable rather than in a temporary extraction folder.
+    """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         exit_code = process.poll()
@@ -395,15 +497,11 @@ def wait_for_resources(process: subprocess.Popen, binary: Path, temp_dir: Path, 
         if (binary.parent / "Resources").is_dir():
             return binary.parent
 
-        for candidate in temp_dir.glob("onefile_*"):
-            if (candidate / "Resources").is_dir():
-                return candidate
-
         time.sleep(0.5)
 
     raise SystemExit(
         f"Smoke test failed: bundled Resources were not found within {timeout}s "
-        f"(looked in {binary.parent} and {temp_dir})."
+        f"(looked in {binary.parent})."
     )
 
 
@@ -452,7 +550,7 @@ def require_size(path: Path, *, minimum_mb: int) -> None:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build the Windows portable executable and/or the Inno Setup installer.",
+        description="Build the Windows portable archive and/or the Inno Setup installer.",
     )
     parser.add_argument(
         "--variant",

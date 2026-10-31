@@ -120,6 +120,20 @@ _A preview of the application in action:_
 Advanced MKV Muxer is compatible with Windows 7/8/8.1/10/11 32-bit/64-bit and most Linux distributions.
 You can download it from the project's [releases&nbsp;page](https://github.com/FlamingWater35/advanced-mkv-muxer/releases).
 
+### For Windows Users
+
+Two builds are published:
+
+- **Portable** (`...-windows-x64-portable.zip`) — unpack the folder anywhere and
+  run `Advanced-MKV-Muxer.exe`. No installation and no administrator rights. Your
+  settings, logs and any updated MKVToolNix tools are kept in a `Data` folder
+  inside that folder, so you can move it to another machine or a USB stick and
+  keep your configuration. Delete `portable.flag` next to the executable to store
+  the data in your user profile instead.
+- **Installer** (`...-windows-x64-setup.exe`) — installs per user below
+  `%LOCALAPPDATA%\Programs\Advanced MKV Muxer`, with a Start Menu entry and an
+  optional desktop shortcut. Settings live in `%APPDATA%\Advanced MKV Muxer`.
+
 ### For Linux Users
 
 The deployed app available in downloads only support glibc 2.35 and above like: Ubuntu 22.04/up , Mint 21.2/up, Fedora 38/up and others.
@@ -145,7 +159,7 @@ sudo apt install libxcb-cursor0
 
 ### Updating The MKVmerge version
 
-The easiest way is the built-in updater: open **Options → MKVToolNix Tools**, which shows the installed `mkvmerge`/`mkvpropedit` versions, then press **Check for Updates**. If a newer release exists, **Update** downloads it from [mkvtoolnix.download](https://mkvtoolnix.download/downloads.html), verifies the checksum (Windows), installs the tools for the current platform and switches to them immediately. Updated tools are stored per user in the application data folder, so the update also works for the portable (onefile) build.
+The easiest way is the built-in updater: open **Options → MKVToolNix Tools**, which shows the installed `mkvmerge`/`mkvpropedit` versions, then press **Check for Updates**. If a newer release exists, **Update** downloads it from [mkvtoolnix.download](https://mkvtoolnix.download/downloads.html), verifies the checksum (Windows), installs the tools for the current platform and switches to them immediately. Updated tools are stored per user in the application data folder (or in `Data` for a portable copy), so the update also works for the portable build.
 
 If you prefer to do it manually, you can still replace the files yourself — but do this only if you're sure of what you're doing, as it may require a reinstallation:
 

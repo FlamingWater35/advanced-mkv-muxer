@@ -2,6 +2,7 @@
 
 import re
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import tests  # noqa: F401  (must run before application imports)
@@ -73,6 +74,75 @@ class LinuxStartupRegressionTests(unittest.TestCase):
 
     def test_ci_smoke_test_verifies_the_profile_was_written(self):
         self.assertIn("setting.json", self.workflow)
+
+
+class PortablePackagingTests(unittest.TestCase):
+    """The portable Windows build must stay a real, self-contained folder.
+
+    A portable copy is a Nuitka standalone folder plus a marker file. The marker
+    switches the application to a ``Data`` folder beside itself, so the folder
+    can be moved between machines with its settings intact. The build script and
+    ``GlobalFiles`` must agree on the marker name.
+    """
+
+    def setUp(self):
+        self.script = (ROOT / "scripts" / "build_windows.py").read_text(encoding="utf-8")
+        self.workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+
+    def test_build_script_and_application_agree_on_the_marker_name(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "build_windows_for_test", ROOT / "scripts" / "build_windows.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertEqual(
+            module.PORTABLE_MARKER_FILE_NAME,
+            GlobalFiles.PORTABLE_MARKER_FILE_NAME,
+        )
+
+    def test_portable_build_is_a_zip_of_a_standalone_folder(self):
+        # The portable variant must not fall back to a onefile executable: a
+        # portable copy needs a real folder for its Data directory.
+        self.assertNotIn('nuitka_command("onefile"', self.script)
+        self.assertIn("-portable.zip", self.script)
+        self.assertIn("--mode=standalone", self.script)
+
+    def test_portable_archive_contains_the_marker(self):
+        self.assertIn("write_portable_marker(portable_folder)", self.script)
+
+    def test_ci_records_the_portable_zip_as_the_release_asset(self):
+        self.assertIn("windows-x64-portable.zip", self.workflow)
+        self.assertNotIn("windows-x64-portable.exe", self.workflow)
+
+    def test_ci_still_expects_four_release_assets(self):
+        self.assertIn("Expected 4 assets", self.workflow)
+
+
+class PortableDataFolderTests(unittest.TestCase):
+    """The marker decides where settings, logs and updated tools are stored."""
+
+    def setUp(self):
+        import tempfile
+
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="portable-"))
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_no_marker_means_the_user_profile_is_used(self):
+        self.assertIsNone(GlobalFiles.get_portable_data_folder(self.temp_dir))
+
+    def test_marker_next_to_the_executable_selects_the_data_folder(self):
+        (self.temp_dir / GlobalFiles.PORTABLE_MARKER_FILE_NAME).write_text("", encoding="utf-8")
+        expected = self.temp_dir / GlobalFiles.PORTABLE_DATA_FOLDER_NAME
+        self.assertEqual(Path(GlobalFiles.get_portable_data_folder(self.temp_dir)), expected)
+
+    def test_portable_data_folder_name_is_data(self):
+        self.assertEqual(GlobalFiles.PORTABLE_DATA_FOLDER_NAME, "Data")
 
 
 class DeferredStartupErrorTests(unittest.TestCase):
