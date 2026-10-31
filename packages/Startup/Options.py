@@ -1,4 +1,6 @@
 import json
+import logging
+import os
 from pathlib import Path
 from PySide6.QtWidgets import QWidget
 from packages.Startup.GlobalFiles import SettingJsonInfoFilePath
@@ -73,22 +75,108 @@ def save_options():
         "Default_Audio_Set_Forced": Options.Default_Audio_Set_Forced
     }
     options_file_path = Path(SettingJsonInfoFilePath)
-    with open(options_file_path, "w+", encoding="UTF-8") as option_file:
-        json.dump(options_data, option_file, indent=4)
+    # Write to a sibling file and swap it in. Opening the real file with "w"
+    # truncates it first, so a crash (or a power loss) between the truncate and
+    # the flush left a zero-byte setting.json behind, and the next start-up died
+    # in json.load() with "Expecting value: line 1 column 1 (char 0)".
+    temporary_path = options_file_path.with_name(options_file_path.name + ".tmp")
+    try:
+        with open(temporary_path, "w", encoding="UTF-8") as option_file:
+            json.dump(options_data, option_file, indent=4)
+            option_file.flush()
+            try:
+                os.fsync(option_file.fileno())
+            except OSError as exception:
+                # Durability is best-effort: the replace below is what keeps the
+                # settings file complete, so a filesystem that cannot fsync must
+                # not turn a working save into a crash.
+                logging.warning("Could not flush the settings file to disk: %s", exception)
+    except Exception:
+        # Leave the existing settings file untouched and do not litter the
+        # profile folder with a half-written temporary file.
+        try:
+            os.remove(temporary_path)
+        except OSError:
+            pass
+        raise
+    os.replace(temporary_path, options_file_path)
+
+
+def _quarantine_corrupt_options(option_file_path):
+    """Move an unreadable settings file aside so the defaults can be rewritten."""
+    broken_path = option_file_path.with_name(option_file_path.name + ".corrupt")
+    try:
+        os.replace(option_file_path, broken_path)
+        logging.warning("The settings file %s could not be read and was moved to %s; "
+                        "default settings are used.", option_file_path, broken_path)
+    except OSError as exception:
+        logging.warning("The settings file %s could not be read (%s) and could not be "
+                        "moved aside; default settings are used.", option_file_path, exception)
+
+
+def _load_options_data(option_file_path):
+    """Return the parsed settings file, or an empty mapping if it is unusable.
+
+    A missing, truncated, empty or otherwise unreadable file must not abort
+    start-up: ``read_option_file`` runs at import time, before any window
+    exists, so an escaping error killed the process with a bare traceback
+    instead of opening the application.
+    """
+    try:
+        with open(option_file_path, "r", encoding="utf-8-sig") as file:
+            data = json.load(file)
+    except (OSError, ValueError) as exception:
+        logging.warning("Could not read the settings file %s: %s", option_file_path, exception)
+        _quarantine_corrupt_options(option_file_path)
+        return {}
+    if not isinstance(data, dict):
+        logging.warning("The settings file %s does not contain a JSON object; "
+                        "default settings are used.", option_file_path)
+        _quarantine_corrupt_options(option_file_path)
+        return {}
+    return data
+
+
+def _normalize_presets(presets):
+    """Return the stored presets as a list of mappings.
+
+    The value comes from a user-writable file, so it can be any JSON type. Only
+    a list of objects is usable; anything else falls back to a single default
+    preset instead of raising while start-up is still in progress.
+    """
+    if presets == "Old":
+        return [{}]
+    if not isinstance(presets, list):
+        logging.warning("The stored presets are not a list (%s); a single default preset is used.",
+                        type(presets).__name__)
+        return [{}]
+    normalized = []
+    for index, preset in enumerate(presets):
+        if not isinstance(preset, dict):
+            logging.warning("Preset #%d is not an object; it is replaced by its defaults.", index + 1)
+            preset = {}
+        normalized.append(preset)
+    if not normalized:
+        # The application always keeps at least one preset: the settings dialog
+        # refuses to delete the last one, and start-up indexes preset 0.
+        logging.warning("No presets were stored; a single default preset is used.")
+        return [{}]
+    return normalized
 
 
 def read_option_file(option_file):
     option_file_path = Path(option_file)
     theme_configured = False
     if option_file_path.is_file():
-        with open(option_file_path, "r+", encoding="utf-8-sig") as option_file:
-            data = json.load(option_file)
+        data = _load_options_data(option_file_path)
+        # An empty mapping means the file was unreadable or held no JSON object.
+        # Skipping the block below keeps the class-level defaults, and the theme
+        # is then detected from the system exactly as on a first start-up.
+        if data:
             theme_configured = "Dark_Mode" in data
-            presets = get_data_from_json(json_data=data, attribute="Presets", default_value="Old")
-            if presets == "Old":
-                preset_number = 1
-            else:
-                preset_number = len(presets)
+            presets = _normalize_presets(
+                get_data_from_json(json_data=data, attribute="Presets", default_value="Old"))
+            preset_number = len(presets)
             Options.DefaultPresets.clear()
             for preset_id in range(preset_number):
                 temp_default_preset = SingleDefaultPresetsData()
@@ -142,6 +230,11 @@ def read_option_file(option_file):
                                                                                                          'Arabic'])
                 Options.DefaultPresets.append(temp_default_preset)
             Options.FavoritePresetId = get_data_from_json(json_data=data, attribute="FavoritePresetId", default_value=0)
+            # The favourite preset is used as a list index right after start-up,
+            # so a stale or out-of-range value would crash with IndexError.
+            if not isinstance(Options.FavoritePresetId, int) or isinstance(Options.FavoritePresetId, bool) \
+                    or not 0 <= Options.FavoritePresetId < len(Options.DefaultPresets):
+                Options.FavoritePresetId = 0
             Options.Dark_Mode = get_data_from_json(json_data=data, attribute="Dark_Mode", default_value=False)
             Options.Attachment_Expert_Mode_Info_Message_Show = get_data_from_json(json_data=data,
                                                                                   attribute="Attachment_Expert_Mode_Info_Message_Show",
