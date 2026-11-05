@@ -3,7 +3,6 @@ import operator
 import os
 import shlex
 import subprocess
-import sys
 from pathlib import Path
 from platform import platform
 from sys import platform
@@ -30,7 +29,12 @@ def add_double_quotation(string):
 
 
 def add_json_line(string):
-    return "\n" + add_double_quotation(string) + ","
+    # json.dumps performs the escaping. Pasting a path in raw is only safe while
+    # it contains no backslash, quote or control character: a Windows path such
+    # as C:\out\file.mkv, or a Linux file name that merely contains a backslash,
+    # made mkvmerge reject the whole job file with
+    # "invalid string: forbidden character after backslash" (#180).
+    return "\n" + add_two_spaces() + json.dumps(str(string), ensure_ascii=False) + ","
 
 
 OUTPUT_OVERRIDE_ARGUMENTS = ("-o", "--output")
@@ -79,13 +83,6 @@ def split_extra_arguments(text):
 
 def delete_trailing_zero_string(string):
     return str(int(str(string)))
-
-
-def check_for_system_backslash_path(string):
-    if sys.platform == "win32":  # Windows
-        return string.replace('\\', '\\\\')
-    else:
-        return string
 
 
 def get_attribute(data, attribute, default_value):
@@ -284,7 +281,7 @@ class GetJsonForMkvmergeJob:
                         continue
                 attachments_list_with_attach_command.append(add_json_line("--attach-file"))
                 attachments_list_with_attach_command.append(
-                    add_json_line(check_for_system_backslash_path(file_to_attach)))
+                    add_json_line(file_to_attach))
             self.attachments_attach_command = "".join(attachments_list_with_attach_command)
 
     def setup_chapter_options(self):
@@ -299,8 +296,7 @@ class GetJsonForMkvmergeJob:
                     if shifted_chapter_file_path != "":
                         chapter_file_path = shifted_chapter_file_path
                 self.chapter_attach_command = add_json_line("--chapters") + \
-                                              add_json_line(
-                                                  check_for_system_backslash_path(chapter_file_path))
+                                              add_json_line(chapter_file_path)
             if GlobalSetting.CHAPTER_DISCARD_OLD or GlobalSetting.CHAPTER_GENERATE_BY_INTERVAL:
                 # --chapters only adds the new chapter file: mkvmerge still
                 # copies the chapters of the source, so they have to be
@@ -462,7 +458,7 @@ class GetJsonForMkvmergeJob:
                     # add subtitle file
                     subtitle_command_list.append(add_json_line("("))
                     subtitle_command_list.append(
-                        add_json_line(check_for_system_backslash_path(self.job.subtitle_name_absolute[i])))
+                        add_json_line(self.job.subtitle_name_absolute[i]))
                     subtitle_command_list.append(add_json_line(")"))
                 self.new_subtitle_append_command = "".join(subtitle_command_list)
 
@@ -586,7 +582,7 @@ class GetJsonForMkvmergeJob:
                     # add audio file
                     audio_command_list.append(add_json_line("("))
                     audio_command_list.append(
-                        add_json_line(check_for_system_backslash_path(self.job.audio_name_absolute[i])))
+                        add_json_line(self.job.audio_name_absolute[i]))
                     audio_command_list.append(add_json_line(")"))
                 self.new_audio_append_command = "".join(audio_command_list)
 
@@ -1080,14 +1076,14 @@ class GetJsonForMkvmergeJob:
         create_parent_folder(output_video_name_absolute)
         output_video_commands_list = []
         output_video_commands_list.append(add_json_line("--output"))
-        output_video_commands_list.append(add_json_line(check_for_system_backslash_path(output_video_name_absolute)))
+        output_video_commands_list.append(add_json_line(output_video_name_absolute))
         self.output_video_command = "".join(output_video_commands_list)
 
     # noinspection PyListCreation
     def setup_input_video_command(self):
         input_video_commands_list = []
         input_video_commands_list.append(add_json_line("("))
-        input_video_commands_list.append(add_json_line(check_for_system_backslash_path(self.job.video_name_absolute)))
+        input_video_commands_list.append(add_json_line(self.job.video_name_absolute))
         input_video_commands_list.append(add_json_line(")"))
         self.input_video_command = "".join(input_video_commands_list)
 

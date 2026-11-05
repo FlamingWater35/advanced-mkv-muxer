@@ -202,10 +202,25 @@ class ThemeButtonTests(unittest.TestCase):
 
 
 class StartupThemeTests(unittest.TestCase):
+    @staticmethod
+    def _config_folder(home):
+        """The profile folder the application reads on this platform.
+
+        GlobalFiles.create_app_data_folder() uses %APPDATA% on Windows and
+        ~/.local/share on Linux. Writing setting.json to the Windows location on
+        a Linux run made the manual-theme tests exercise a file the application
+        never opened, so they reported the detected system theme instead.
+        """
+        if sys.platform == "win32":
+            return home / "AppData" / "Roaming" / "Advanced MKV Muxer"
+        if sys.platform == "darwin":
+            return home / "Library" / "Application Support" / "Advanced MKV Muxer"
+        return home / ".local" / "share" / "Advanced MKV Muxer"
+
     def _run_application(self, settings=None):
         home = Path(tempfile.mkdtemp(prefix="startup-", dir=TEMP_ROOT))
         appdata = home / "AppData" / "Roaming"
-        config_folder = appdata / "Advanced MKV Muxer"
+        config_folder = self._config_folder(home)
         config_folder.mkdir(parents=True)
         if settings is not None:
             write_settings(settings, config_folder / "setting.json")

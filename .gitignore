@@ -5,6 +5,7 @@
 # case-insensitively on Windows and would otherwise hide /scripts as well.
 !/scripts/
 /venv/
+/.venv/
 /pyvenv.cfg
 /.idea/
 /MkvEnv/
@@ -12,6 +13,10 @@
 /build/
 /dist/
 /.scratch/
+# Local scratch space used by agent runs and ad-hoc probes, plus the report
+# folder of the Windows sandbox ACL diagnostic. Neither is part of the project.
+/.work/
+/.acl-recovery/
 /Testing/test.py
 /Testing/
 *.pyc

@@ -6,6 +6,7 @@ can fail for seconds while the muxer or a virus scanner still holds it open,
 and size queries can block on network shares.
 """
 
+import ntpath
 import os
 import shutil
 import time
@@ -175,6 +176,26 @@ def create_parent_folder(absolute_path):
 
 RELATIVE_FOLDER_PREFIXES = (".\\", "./", "..\\", "../")
 
+# Prefixes written the Windows way, which still have to resolve on Linux: a
+# settings file or a preset made on Windows carries a destination like
+# ".\converted" over to a machine where the separator is "/".
+WINDOWS_RELATIVE_PREFIXES = (".\\", "..\\")
+
+
+def normalize_destination_separators(text):
+    """Resolve a Windows-style relative destination on a POSIX host.
+
+    Only a value that actually starts with a Windows relative prefix is
+    rewritten. A plain folder name is left alone, because a backslash is a legal
+    character in a Linux file name and rewriting it would change which folder
+    the user asked for.
+    """
+    if os.sep == "\\":
+        return text
+    if not text.startswith(WINDOWS_RELATIVE_PREFIXES):
+        return text
+    return text.replace("\\", "/")
+
 
 def is_relative_destination_folder(folder_path):
     """True for a destination like "converted" or ".\\converted" (#118).
@@ -187,15 +208,19 @@ def is_relative_destination_folder(folder_path):
         return False
     if text.startswith(RELATIVE_FOLDER_PREFIXES):
         return True
-    if os.path.isabs(text):
+    # A Windows drive path is absolute even when this runs on Linux, where
+    # os.path does not know about drive letters: os.path.isabs("C:\\out") is
+    # False there, so it used to be treated as a folder name called "C:\out".
+    if os.path.isabs(text) or ntpath.isabs(text):
         return False
     # "C:converted" is drive relative, not a folder name: leave it alone.
-    return os.path.splitdrive(text)[0] == ""
+    return ntpath.splitdrive(text)[0] == ""
 
 
 def get_relative_destination_folder(job):
-    return os.path.normpath(os.path.join(os.path.dirname(job.video_name_absolute),
-                                         str(GlobalSetting.DESTINATION_FOLDER_PATH).strip()))
+    destination = normalize_destination_separators(
+        str(GlobalSetting.DESTINATION_FOLDER_PATH).strip())
+    return os.path.normpath(os.path.join(os.path.dirname(job.video_name_absolute), destination))
 
 
 def uses_relative_destination(job):

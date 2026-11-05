@@ -1,3 +1,4 @@
+import json
 import unittest
 
 import tests  # noqa: F401  (must run before application imports)
@@ -33,6 +34,32 @@ class CoreHelperTests(unittest.TestCase):
         self.assertEqual(add_two_spaces(), "  ")
         self.assertEqual(add_double_quotation("value"), '  "value"')
         self.assertEqual(add_json_line("value"), '\n  "value",')
+
+    def test_json_line_escapes_characters_json_forbids_raw(self):
+        """A path is written into the job file, so it must be JSON-escaped.
+
+        The job file is a JSON array of mkvmerge arguments. Pasting a path in
+        raw only worked while it held no backslash: mkvmerge rejected the whole
+        file with "invalid string: forbidden character after backslash" (#180).
+        """
+        windows_path = "C:\\out\\season 1\\movie.mkv"
+        line = add_json_line(windows_path)
+        self.assertEqual(json.loads("[" + line.rstrip(",") + "]"), [windows_path])
+
+        # A backslash is a legal character in a Linux file name.
+        posix_path = "/media/library/My\\Movie.mkv"
+        line = add_json_line(posix_path)
+        self.assertEqual(json.loads("[" + line.rstrip(",") + "]"), [posix_path])
+
+        # Quotes and control characters break the file in the same way.
+        for value in ('a"b.mkv', "tab\there.mkv", "back\\slash"):
+            line = add_json_line(value)
+            self.assertEqual(json.loads("[" + line.rstrip(",") + "]"), [value])
+
+    def test_json_line_keeps_non_ascii_readable(self):
+        line = add_json_line("Amélie.mkv")
+        self.assertEqual(json.loads("[" + line.rstrip(",") + "]"), ["Amélie.mkv"])
+        self.assertIn("Amélie", line)
 
     def test_trailing_zero_removal(self):
         self.assertEqual(delete_trailing_zero_string("03"), "3")

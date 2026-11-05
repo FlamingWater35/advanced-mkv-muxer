@@ -1,4 +1,5 @@
 import importlib
+import sys
 import unittest
 from pathlib import Path
 
@@ -14,6 +15,24 @@ from packages.Startup.GlobalFiles import (
 from packages.Startup.Version import Version
 from tests import ROOT, TEMP_ROOT
 from tests.support import FakeTaskBarProgress, read_settings, reset_options
+
+# Modules that only exist on Windows: they import comtypes, which wraps the
+# Windows taskbar COM API, and one of them is a generated file encoded as mbcs,
+# which is not a codec on Linux. The release build excludes exactly these with
+# --nofollow-import-to (see .github/workflows/release.yml), so importing them
+# unconditionally made this test fail on a correct Linux install.
+WINDOWS_ONLY_MODULES = {
+    "packages.MainWindow",
+    "packages.Widgets.TaskBarProgress",
+    "packages.Widgets.WindowsTaskBar",
+    "packages.Widgets.WindowsTaskBarLib",
+}
+
+
+def is_available_on_this_platform(module_name):
+    if sys.platform == "win32":
+        return True
+    return module_name not in WINDOWS_ONLY_MODULES
 
 
 class ApplicationStartupTests(unittest.TestCase):
@@ -50,6 +69,8 @@ class ApplicationStartupTests(unittest.TestCase):
                 module_name = ".".join(relative.parts[:-1])
             else:
                 module_name = ".".join(relative.parts)
+            if not is_available_on_this_platform(module_name):
+                continue
             try:
                 importlib.import_module(module_name)
             except Exception as exc:  # pragma: no cover - reported below
@@ -62,12 +83,21 @@ class MainWindowTests(unittest.TestCase):
         reset_options(dark_mode=True)
 
     def test_main_window_constructs_with_expected_ui(self):
-        import packages.MainWindow as main_window_module
+        # The two window classes differ only in the taskbar integration and the
+        # platform title bar, so the same UI expectations apply to both.
+        if sys.platform == "win32":
+            import packages.MainWindow as main_window_module
 
-        original_task_bar = main_window_module.TaskBarProgress
-        main_window_module.TaskBarProgress = FakeTaskBarProgress
+            window_class = main_window_module.MainWindow
+            original_task_bar = main_window_module.TaskBarProgress
+            main_window_module.TaskBarProgress = FakeTaskBarProgress
+        else:
+            import packages.MainWindowNonWindowsSystem as main_window_module
+
+            window_class = main_window_module.MainWindowNonWindowsSystem
+            original_task_bar = None
         try:
-            window = main_window_module.MainWindow([str(ROOT / "main.py")])
+            window = window_class([str(ROOT / "main.py")])
             try:
                 self.assertEqual(window.windowTitle(), f"Advanced MKV Muxer v{Version}")
                 self.assertTrue(window.isVisible())
@@ -80,4 +110,5 @@ class MainWindowTests(unittest.TestCase):
             finally:
                 window.close()
         finally:
-            main_window_module.TaskBarProgress = original_task_bar
+            if original_task_bar is not None:
+                main_window_module.TaskBarProgress = original_task_bar

@@ -318,6 +318,27 @@ class RelativeDestinationTests(Batch5TestCase):
         self.assertFalse(is_relative_destination_folder(""))
         self.assertFalse(is_relative_destination_folder("   "))
 
+    def test_windows_drive_path_is_absolute_on_every_platform(self):
+        r"""os.path.isabs("C:\\out") is False on Linux; ntpath's answer is not.
+
+        Treating a Windows drive path as a folder name put the output into a
+        directory literally called "C:\out" inside the source folder.
+        """
+        for value in ("C:\\out", "C:/out", "D:\\Movies\\out", "\\\\server\\share\\out"):
+            self.assertFalse(is_relative_destination_folder(value),
+                             f"{value!r} is an absolute Windows path")
+
+    def test_windows_relative_destination_resolves_on_posix(self):
+        r"""A ".\converted" destination carried over from Windows must work."""
+        source = self.make_movie(self._work_dir / "season1")
+        GlobalSetting.DESTINATION_FOLDER_PATH = ".\\converted"
+        job = self.make_job(source)
+        self.assertTrue(uses_relative_destination(job))
+        expected = os.path.join(os.path.dirname(str(source)), "converted")
+        self.assertEqual(get_output_folder_path(job), expected)
+        self.assertEqual(get_output_file_path(job),
+                         os.path.join(expected, "movie.mkv"))
+
     def test_output_paths_follow_each_source(self):
         first = self.make_movie(self._work_dir / "season1")
         second = self.make_movie(self._work_dir / "season2" / "extras")

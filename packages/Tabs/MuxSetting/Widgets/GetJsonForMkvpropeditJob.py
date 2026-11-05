@@ -21,18 +21,16 @@ def add_double_quotation(string):
 
 
 def add_json_line(string):
-    return "\n" + add_double_quotation(string) + ","
+    # json.dumps performs the escaping. Pasting a path in raw is only safe while
+    # it contains no backslash, quote or control character: a Windows path such
+    # as C:\out\file.mkv, or a Linux file name that merely contains a backslash,
+    # made mkvpropedit reject the whole job file with
+    # "invalid string: forbidden character after backslash" (#180).
+    return "\n" + add_two_spaces() + json.dumps(str(string), ensure_ascii=False) + ","
 
 
 def delete_trailing_zero_string(string):
     return str(int(str(string)))
-
-
-def check_for_system_backslash_path(string):
-    if sys.platform == "win32":  # Windows
-        return string.replace('\\', '\\\\')
-    else:
-        return string
 
 
 def increase_id_by_one(string):
@@ -153,7 +151,7 @@ class GetJsonForMkvpropeditJob:
                         continue
                 attachments_list_with_attach_command.append(add_json_line("--add-attachment"))
                 attachments_list_with_attach_command.append(
-                    add_json_line(check_for_system_backslash_path(file_to_attach)))
+                    add_json_line(file_to_attach))
         self.attachments_attach_command = "".join(attachments_list_with_attach_command)
         self.discard_old_attachments_command = "".join(discard_old_attachments_list_command)
 
@@ -167,8 +165,7 @@ class GetJsonForMkvpropeditJob:
                     if shifted_chapter_file_path != "":
                         chapter_file_path = shifted_chapter_file_path
                 self.chapter_attach_command = add_json_line("--chapters") + \
-                                              add_json_line(
-                                                  check_for_system_backslash_path(chapter_file_path))
+                                              add_json_line(chapter_file_path)
             elif GlobalSetting.CHAPTER_DISCARD_OLD:
                 self.chapter_attach_command = add_json_line("--chapters") + add_json_line("")
 
@@ -704,7 +701,7 @@ class GetJsonForMkvpropeditJob:
     # noinspection PyListCreation
     def setup_input_video_command(self):
         input_video_commands_list = []
-        input_video_commands_list.append(add_json_line(check_for_system_backslash_path(self.job.video_name_absolute)))
+        input_video_commands_list.append(add_json_line(self.job.video_name_absolute))
         self.input_video_command = "".join(input_video_commands_list)
 
     def setup_final_command(self):

@@ -107,10 +107,15 @@ class CorruptSettingsFileTests(unittest.TestCase):
             self.assertTrue(path.is_file())
 
             # Second run must take the normal path, with no quarantine and no
-            # new .corrupt file.
-            Options.Dark_Mode = True
+            # new .corrupt file. The recovered file stores whatever theme the
+            # first start-up detected, so the check is that reading the file
+            # loads *its* value: forcing the opposite value first makes the
+            # assertion independent of the theme of the machine running the
+            # tests (it used to require a dark-mode host).
+            stored_theme = read_settings(path)["Dark_Mode"]
+            Options.Dark_Mode = not stored_theme
             read_option_file(str(path))
-            self.assertTrue(Options.Dark_Mode)
+            self.assertEqual(Options.Dark_Mode, stored_theme)
             self.assertEqual(
                 sorted(p.name for p in self.temp_dir.iterdir()),
                 ["setting.json", "setting.json.corrupt"],

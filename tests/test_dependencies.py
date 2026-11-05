@@ -10,6 +10,20 @@ from PySide6.QtCore import Qt
 
 from packages.Startup.MainApplication import MainApplication
 
+# requirements.txt pins a few packages that only exist on one platform, and CI
+# installs the same file with those lines removed (see .github/workflows).
+# comtypes wraps the Windows taskbar API, so it is absent on Linux by design and
+# asserting its version there would fail a correct install.
+PLATFORM_ONLY_PACKAGES = {
+    "comtypes": "win32",
+}
+
+
+def is_installed_on_this_platform(package):
+    """False for a requirement that is deliberately absent on this platform."""
+    required_on = PLATFORM_ONLY_PACKAGES.get(package.lower())
+    return required_on is None or required_on == sys.platform
+
 
 class DependencyTests(unittest.TestCase):
     def test_python_version(self):
@@ -17,25 +31,33 @@ class DependencyTests(unittest.TestCase):
 
     def test_requirements_are_installed(self):
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-        checked = 0
+        expected_packages = {}
         for line in requirements.splitlines():
             line = line.strip()
             if not line or line.startswith("#") or "==" not in line:
                 continue
             package, expected = (part.strip() for part in line.split("==", 1))
+            if not is_installed_on_this_platform(package):
+                continue
+            expected_packages[package] = expected
+        # Guards against a parser that silently matches nothing: the loop below
+        # would then pass while checking no package at all. Only two of the three
+        # pins apply on Linux, because comtypes is Windows-only.
+        self.assertGreaterEqual(len(expected_packages), 2)
+        for package, expected in expected_packages.items():
             self.assertEqual(version(package), expected,
                              f"{package} does not match requirements.txt")
-            checked += 1
-        self.assertGreaterEqual(checked, 3)
 
     def test_required_modules_import(self):
-        import comtypes
         import psutil
         import PySide6
 
         self.assertTrue(PySide6.__version__)
         self.assertTrue(psutil.__version__)
-        self.assertTrue(comtypes.__version__)
+        if sys.platform == "win32":
+            import comtypes
+
+            self.assertTrue(comtypes.__version__)
 
     def test_shiboken6_is_a_real_package_and_not_a_namespace_package(self):
         """Guards the start-up crash caused by an incomplete shiboken6 install.
