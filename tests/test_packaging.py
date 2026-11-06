@@ -207,3 +207,112 @@ class DeferredStartupErrorTests(unittest.TestCase):
         with mock.patch.object(GlobalFiles, "MissingFilesMessage") as missing_files_message:
             GlobalFiles.show_startup_error_if_any()
         missing_files_message.assert_not_called()
+
+
+class WindowsRuntimeLibraryTests(unittest.TestCase):
+    """The Windows payload must ship every DLL its extension modules import.
+
+    Nuitka copies ``_ctypes.pyd``/``_ssl.pyd`` but not the libraries they link
+    against. With an Anaconda interpreter those live in ``Library/bin`` and are
+    only found through the build machine's PATH, so the released artifact used
+    to abort with 0xC0000409 at the first ``import ctypes`` (``ffi.dll``) or fail
+    with ``ImportError: LoadLibraryExW ... _ssl.pyd`` (``libssl-3-x64.dll``).
+    """
+
+    def setUp(self):
+        import sys
+
+        scripts = str(ROOT / "scripts")
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        import build_windows
+
+        self.build = build_windows
+
+    def test_build_script_collects_missing_runtime_libraries(self):
+        source = (ROOT / "scripts" / "build_windows.py").read_text(encoding="utf-8")
+        self.assertIn("def copy_missing_runtime_dlls", source)
+        self.assertIn("copy_missing_runtime_dlls(payload)", source)
+
+    def test_build_script_looks_beside_the_interpreter(self):
+        # Library/bin is where an Anaconda interpreter keeps libssl/libffi.
+        directories = self.build.dependency_library_dirs()
+        self.assertTrue(directories, "no interpreter directories were discovered")
+        for directory in directories:
+            self.assertTrue(Path(directory).is_dir())
+
+    def test_pe_parser_reads_imports_from_a_real_module(self):
+        import sys
+
+        candidate = Path(sys.base_prefix) / "DLLs" / "_ssl.pyd"
+        if not candidate.is_file():
+            self.skipTest("_ssl.pyd is not available in this interpreter")
+        imports = [name.lower() for name in self.build.pe_imports(candidate)]
+        self.assertIn("python312.dll", imports)
+        self.assertTrue(
+            any(name.startswith("libssl") or name.startswith("libcrypto") for name in imports),
+            f"expected an OpenSSL import, got {imports}",
+        )
+
+    def test_system_library_detection_covers_the_os(self):
+        self.assertTrue(self.build.is_system_library("kernel32.dll"))
+        self.assertTrue(self.build.is_system_library("api-ms-win-crt-runtime-l1-1-0.dll"))
+        self.assertFalse(self.build.is_system_library("ffi.dll"))
+
+    def test_unresolvable_dependency_is_a_hard_error(self):
+        import shutil
+        import sys
+        import tempfile
+
+        candidate = Path(sys.base_prefix) / "DLLs" / "_ssl.pyd"
+        if not candidate.is_file():
+            self.skipTest("_ssl.pyd is not available in this interpreter")
+
+        with tempfile.TemporaryDirectory() as folder:
+            payload = Path(folder)
+            shutil.copy2(candidate, payload / candidate.name)
+            # Pretend the interpreter ships nothing, so the import cannot resolve.
+            with mock.patch.object(self.build, "dependency_library_dirs", return_value=[]):
+                with self.assertRaises(SystemExit) as caught:
+                    self.build.copy_missing_runtime_dlls(payload)
+            message = str(caught.exception).lower()
+            self.assertIn("missing runtime libraries", message)
+            self.assertIn("libssl", message)
+
+
+class TaskBarFailureTests(unittest.TestCase):
+    """A taskbar that refuses COM calls must not take the application down.
+
+    ``ITaskbarList3`` returns E_ACCESSDENIED in sessions without a shell, and the
+    packaged build used to die there during ``MainWindow.__init__``.
+    """
+
+    def test_windows_taskbar_swallows_com_errors(self):
+        source = (ROOT / "packages" / "Widgets" / "WindowsTaskBar.py").read_text(encoding="utf-8")
+        self.assertIn("def _call", source)
+        self.assertIn("except Exception", source)
+        # The constructor must not raise when CreateObject fails.
+        constructor = source.split("def __init__")[1].split("def ")[0]
+        self.assertIn("self.taskbar = None", constructor)
+        self.assertIn("except Exception", constructor)
+
+    def test_progress_updates_are_noops_without_a_taskbar(self):
+        import sys
+
+        if sys.platform != "win32":
+            self.skipTest("the taskbar integration only exists on Windows")
+        from packages.Widgets.WindowsTaskBar import WindowsTaskBar
+
+        bar = WindowsTaskBar.__new__(WindowsTaskBar)
+        bar.window_id = 0
+        bar.taskbar = None
+        self.assertFalse(bar.is_available)
+        # Every call must return quietly instead of raising.
+        bar.setState("normal")
+        bar.setState("warning")
+        bar.setState("error")
+        bar.setState("loading")
+        bar.setState("done")
+        bar.setProgress(50)
+        bar.setOverlayIcon("does-not-exist.ico")
+        bar.clearOverlayIcon()

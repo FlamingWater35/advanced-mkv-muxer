@@ -34,6 +34,7 @@ import os
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -208,9 +209,187 @@ def build_standalone(args: argparse.Namespace, version: str) -> Path:
     for relative in required:
         if not (payload / relative).is_file():
             raise SystemExit(f"The standalone build is missing {relative!r} in {payload}")
+
+    # Nuitka copies extension modules but not the libraries they link against.
+    # With an Anaconda interpreter those sit in Library/bin, which only exists on
+    # the build machine's PATH, so an unpatched payload aborts at start-up with
+    # 0xC0000409 (import ctypes) or fails to load _ssl.pyd.
+    added = copy_missing_runtime_dlls(payload)
+    if added:
+        log(f"Added {len(added)} runtime library/libraries Nuitka did not copy")
+
     print(f"Standalone payload: {payload}", flush=True)
     args._standalone_payload = payload
     return payload
+
+
+def dependency_library_dirs() -> list[Path]:
+    """Return the folders that hold the DLLs this interpreter links against.
+
+    Nuitka copies the extension modules (``_ctypes.pyd``, ``_ssl.pyd``, ...) but
+    not the libraries they import. With the python.org installer those live in
+    the installation root and are found anyway; with an Anaconda/Miniconda
+    interpreter they live in ``Library/bin``, which is only on the *build*
+    machine's PATH. A packaged build then aborts with 0xC0000409 at the first
+    ``import ctypes`` (``ffi.dll``) or raises ``ImportError: LoadLibraryExW
+    ... _ssl.pyd failed`` because ``libssl-3-x64.dll`` is missing.
+    """
+    candidates = [
+        Path(sys.base_prefix),
+        Path(sys.prefix),
+        Path(sys.base_prefix) / "Library" / "bin",
+        Path(sys.prefix) / "Library" / "bin",
+        Path(sys.base_prefix) / "DLLs",
+        Path(sys.prefix) / "DLLs",
+    ]
+    seen: list[Path] = []
+    for candidate in candidates:
+        if candidate.is_dir() and candidate not in seen:
+            seen.append(candidate)
+    return seen
+
+
+def pe_imports(path: Path) -> list[str]:
+    """Return the DLL names a PE file imports, read straight from its headers."""
+    data = path.read_bytes()
+    pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
+    if data[pe_offset:pe_offset + 4] != b"PE\0\0":
+        raise ValueError(f"not a PE file: {path}")
+
+    coff = pe_offset + 4
+    _, section_count, _, _, _, optional_size, _ = struct.unpack_from("<HHIIIHH", data, coff)
+    optional = coff + 20
+    magic = struct.unpack_from("<H", data, optional)[0]
+    directories = optional + (112 if magic == 0x20B else 96)
+    import_rva, _ = struct.unpack_from("<II", data, directories + 8)
+    if import_rva == 0:
+        return []
+
+    # Each section header is 40 bytes: name(8), virtual size(4), virtual
+    # address(4), raw size(4), raw pointer(4), ...
+    sections_at = optional + optional_size
+    sections = [
+        struct.unpack_from("<IIII", data, sections_at + index * 40 + 8)
+        for index in range(section_count)
+    ]
+
+    def offset_of(rva: int) -> int | None:
+        for virtual_size, virtual_address, raw_size, raw_pointer in sections:
+            if virtual_address <= rva < virtual_address + max(virtual_size, raw_size):
+                return raw_pointer + (rva - virtual_address)
+        return None
+
+    names: list[str] = []
+    cursor = offset_of(import_rva)
+    while cursor is not None:
+        entry = data[cursor:cursor + 20]
+        if len(entry) < 20 or entry == b"\0" * 20:
+            break
+        name_rva = struct.unpack_from("<I", entry, 12)[0]
+        if name_rva == 0:
+            break
+        name_at = offset_of(name_rva)
+        if name_at is None:
+            break
+        end = data.index(b"\0", name_at)
+        names.append(data[name_at:end].decode("ascii", "replace"))
+        cursor += 20
+    return names
+
+
+# Windows itself provides these, so a payload never ships them. Anything that
+# resolves inside the Windows directory is treated as a system library too; this
+# set only covers the names that are not always present on a build machine.
+SYSTEM_DLL_PREFIXES = ("api-ms-win-", "ext-ms-")
+SYSTEM_DLLS = {
+    "advapi32.dll", "authz.dll", "bcrypt.dll", "comctl32.dll", "comdlg32.dll",
+    "crypt32.dll", "d2d1.dll", "d3d11.dll", "d3d12.dll", "d3d9.dll",
+    "dbghelp.dll", "dnsapi.dll", "dwmapi.dll", "dwrite.dll", "dxgi.dll",
+    "gdi32.dll", "glu32.dll", "imm32.dll", "iphlpapi.dll", "kernel32.dll",
+    "kernelbase.dll", "mf.dll", "mfplat.dll", "mpr.dll", "mscms.dll",
+    "msvcrt.dll", "mswsock.dll", "ncrypt.dll", "netapi32.dll", "ntdll.dll",
+    "ole32.dll", "oleaut32.dll", "opengl32.dll", "pdh.dll", "powrprof.dll",
+    "propsys.dll", "psapi.dll", "rpcrt4.dll", "secur32.dll", "setupapi.dll",
+    "shell32.dll", "shlwapi.dll", "sspicli.dll", "uiautomationcore.dll",
+    "urlmon.dll", "user32.dll", "userenv.dll", "uxtheme.dll", "version.dll",
+    "winhttp.dll", "wininet.dll", "winmm.dll", "winspool.drv", "wintrust.dll",
+    "wldap32.dll", "ws2_32.dll", "wtsapi32.dll",
+}
+
+
+def is_system_library(name: str) -> bool:
+    """Report whether Windows itself supplies this DLL.
+
+    A name is a system library when it is on the known list, uses an API-set
+    prefix, or resolves inside the Windows directory. The last rule keeps the
+    list from having to enumerate every OS component.
+    """
+    lowered = name.lower()
+    if lowered in SYSTEM_DLLS or lowered.startswith(SYSTEM_DLL_PREFIXES):
+        return True
+    windows_dir = os.environ.get("WINDIR", r"C:\Windows")
+    return (Path(windows_dir) / "System32" / name).is_file()
+
+
+def copy_missing_runtime_dlls(payload: Path) -> list[str]:
+    """Copy every non-system DLL the payload needs but does not ship.
+
+    The scan repeats until nothing new is required, because a copied library can
+    itself depend on another one (``_ssl.pyd`` -> ``libssl`` -> ``libcrypto``).
+
+    Returns the names that were copied, so the build log states exactly which
+    libraries were added. A dependency that cannot be resolved is a hard error:
+    the alternative is an artifact that aborts at start-up on a user's machine.
+    """
+    library_dirs = dependency_library_dirs()
+    copied: list[str] = []
+
+    while True:
+        shipped = {path.name.lower() for path in payload.iterdir() if path.is_file()}
+        required: dict[str, set[str]] = {}
+        for path in sorted(payload.rglob("*")):
+            if path.suffix.lower() not in {".pyd", ".dll", ".exe"} or not path.is_file():
+                continue
+            try:
+                imports = pe_imports(path)
+            except (OSError, ValueError, struct.error):
+                continue
+            for name in imports:
+                lowered = name.lower()
+                if lowered in shipped or is_system_library(name):
+                    continue
+                required.setdefault(lowered, set()).add(path.name)
+
+        if not required:
+            break
+
+        added_this_round = 0
+        unresolved: dict[str, set[str]] = {}
+        for name, importers in sorted(required.items()):
+            source = next((folder / name for folder in library_dirs if (folder / name).is_file()), None)
+            if source is None:
+                unresolved[name] = importers
+                continue
+            shutil.copy2(source, payload / source.name)
+            copied.append(source.name)
+            added_this_round += 1
+
+        if added_this_round == 0:
+            details = "\n".join(
+                f"  {name} (needed by {', '.join(sorted(importers))})"
+                for name, importers in sorted(unresolved.items())
+            )
+            raise SystemExit(
+                "The standalone payload is missing runtime libraries that are not part of "
+                f"Windows and cannot be found next to the interpreter:\n{details}\n"
+                "Searched: " + ", ".join(str(folder) for folder in library_dirs) + "\n"
+                "Build with the python.org 3.12 installer (as CI does) or install the "
+                "missing libraries."
+            )
+
+    for name in copied:
+        print(f"  added runtime library: {name}", flush=True)
+    return copied
 
 
 def write_portable_marker(folder: Path) -> Path:
