@@ -467,18 +467,27 @@ def library_closure(tools: dict[str, Path], lib_dir: Path, needed_reader=elf_nee
 # ---------------------------------------------------------------------------
 
 def probe_version(tool: Path, environment: dict | None = None) -> str | None:
-    """Run ``<tool> -V`` and return its version, or None."""
+    """Run ``<tool> -V`` and return its version, or None.
+
+    Only stdout is parsed, and only for a successful run. When a Linux binary
+    cannot load one of its shared libraries the loader writes
+    ``error while loading shared libraries: libboost_filesystem.so.1.85.0: ...``
+    to stderr; parsing that text reported the library version (1.85.0) as the
+    tool version and hid the real problem behind a bogus mismatch.
+    """
     try:
         result = subprocess.run(
             [str(tool), "-V"],
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             text=True,
             timeout=60,
             check=False,
             env=environment,
         )
     except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
         return None
     return parse_version(result.stdout)
 

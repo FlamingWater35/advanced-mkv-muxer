@@ -145,6 +145,7 @@ Progress and errors are parsed from the tool log by the
 | change track discovery | `Tabs/GlobalSetting.py::refresh_tracks` (uses `mkvmerge -J`, cached in `MediaInfo/`) |
 | add a persisted setting | `Startup/Options.py` (`save_options` + `read_option_file`) and `tests/support.py` |
 | change the tool updater | `packages/ToolUpdates/` (keep it Qt-free) + `SettingTab/Widgets/ToolsUpdateGroupBox.py` |
+| change the app update check | `packages/ToolUpdates/AppUpdateChecker.py` + `SettingTab/Widgets/AppUpdateGroupBox.py` |
 | change theming | `Startup/ColorThems.py`, `SetupThems.py`, `SystemTheme.py` |
 | change packaging | `scripts/build_windows.py`, `installer/`, `.github/workflows/release.yml` |
 

@@ -9,6 +9,7 @@ from packages.Startup.GlobalFiles import InfoIconPath
 from packages.Startup.GlobalIcons import SettingIcon
 from packages.Startup.InitializeScreenResolution import screen_size
 from packages.Tabs.SettingTab.Widgets.AboutButton import AboutButton
+from packages.Tabs.SettingTab.Widgets.AppUpdateGroupBox import AppUpdateGroupBox
 from packages.Tabs.SettingTab.Widgets.PresetTabComboBox import PresetTabComboBox
 from packages.Tabs.SettingTab.Widgets.PresetTabDeleteButton import PresetTabDeleteButton
 from packages.Tabs.SettingTab.Widgets.PresetTabRenameButton import PresetTabRenameButton
@@ -70,19 +71,22 @@ class SettingDialog(MyDialog):
         self.setting_info_layout.addWidget(self.setting_info_text_label, stretch=1)
         self.setting_info_layout.addWidget(self.setting_about_button, stretch=0, alignment=Qt.AlignmentFlag.AlignRight)
 
+        self.app_update_groupBox = AppUpdateGroupBox()
         self.tools_update_groupBox = ToolsUpdateGroupBox()
 
         self.main_layout = QGridLayout()
         self.main_layout.addLayout(self.preset_tab_setting_layout, 0, 0, 1, 1)
         self.main_layout.addWidget(self.current_preset_tab, 1, 0, 1, 1)
-        self.main_layout.addWidget(self.tools_update_groupBox, 2, 0, 1, 1)
-        self.main_layout.addLayout(self.setting_info_layout, 3, 0, 1, 1)
-        self.main_layout.addLayout(self.buttons_layout, 4, 0, 1, 1)
+        self.main_layout.addWidget(self.app_update_groupBox, 2, 0, 1, 1)
+        self.main_layout.addWidget(self.tools_update_groupBox, 3, 0, 1, 1)
+        self.main_layout.addLayout(self.setting_info_layout, 4, 0, 1, 1)
+        self.main_layout.addLayout(self.buttons_layout, 5, 0, 1, 1)
 
         self.main_layout.setRowStretch(1, 0)
         self.main_layout.setRowStretch(2, 0)
         self.main_layout.setRowStretch(3, 0)
         self.main_layout.setRowStretch(4, 0)
+        self.main_layout.setRowStretch(5, 0)
         self.main_layout.setContentsMargins(10, 10, 10, 10)
         self.setLayout(self.main_layout)
 
@@ -127,6 +131,11 @@ class SettingDialog(MyDialog):
         self.close()
 
     def block_close_while_updating(self):
+        if self.app_update_groupBox.is_busy():
+            self.app_update_groupBox.status_label.setText(
+                "Please wait for the update check to finish before closing this window."
+            )
+            return True
         if self.tools_update_groupBox.is_busy():
             self.tools_update_groupBox.status_label.setText(
                 "Please wait for the MKVToolNix update to finish before closing this window."

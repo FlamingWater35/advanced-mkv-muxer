@@ -292,9 +292,10 @@ class WindowsArchiveTests(unittest.TestCase):
 
 
 class FakeCompletedProcess:
-    def __init__(self, returncode=0, stderr=""):
+    def __init__(self, returncode=0, stderr="", stdout=""):
         self.returncode = returncode
         self.stderr = stderr
+        self.stdout = stdout
 
 
 class AppImageExtractionTests(unittest.TestCase):
@@ -479,6 +480,33 @@ class ToolPathTests(unittest.TestCase):
                 paths = GlobalFiles.get_tool_paths()
                 self.assertEqual(Path(paths[0]).parent, user_dir)
                 self.assertEqual(Path(paths[1]).parent, user_dir)
+
+
+class ProbeVersionTests(unittest.TestCase):
+    """The probe must read the tool's own version, not a loader error."""
+
+    def test_reads_the_version_from_stdout(self):
+        result = FakeCompletedProcess(0, stdout="mkvmerge v103.0 ('The Darkness') 64-bit\n")
+        with mock.patch.object(updater.subprocess, "run", return_value=result):
+            self.assertEqual(updater.probe_version(Path("mkvmerge")), "103.0")
+
+    def test_loader_error_on_stderr_is_not_a_version(self):
+        # A Linux binary that cannot find its libraries exits with 127 and the
+        # loader names the library version in stderr. That used to be parsed as
+        # the tool version.
+        result = FakeCompletedProcess(
+            127,
+            "mkvmerge: error while loading shared libraries: "
+            "libboost_filesystem.so.1.85.0: cannot open shared object file: "
+            "No such file or directory\n",
+        )
+        with mock.patch.object(updater.subprocess, "run", return_value=result):
+            self.assertIsNone(updater.probe_version(Path("mkvmerge")))
+
+    def test_failed_run_is_not_a_version(self):
+        result = FakeCompletedProcess(1, "boom", "mkvmerge v103.0\n")
+        with mock.patch.object(updater.subprocess, "run", return_value=result):
+            self.assertIsNone(updater.probe_version(Path("mkvmerge")))
 
 
 class WorkerTests(unittest.TestCase):
