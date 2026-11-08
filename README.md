@@ -23,13 +23,11 @@
 
 ---
 
-<p align="center">
-  <a href="https://github.com/yaser01/mkv-muxing-batch-gui/assets/52576632/33f8bf3e-600c-4e0d-8ee2-ca51abdf79dc">
-    <img src="https://img.youtube.com/vi/33f8bf3e-600c-4e0d-8ee2-ca51abdf79dc/0.jpg" alt="Advanced MKV Muxer Preview" width="720">
-  </a>
-  <br />
-  <em>Advanced MKV Muxer in action</em>
-</p>
+## ✨ App Preview
+
+_A preview of Advanced MKV Muxer in action:_
+
+<https://github.com/yaser01/mkv-muxing-batch-gui/assets/52576632/33f8bf3e-600c-4e0d-8ee2-ca51abdf79dc>
 
 ---
 
