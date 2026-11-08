@@ -39,7 +39,8 @@ _A preview of Advanced MKV Muxer in action:_
   - [📦 Pre-built Releases](#-pre-built-releases)
   - [🐧 For Linux Users](#-for-linux-users)
   - [💻 Using Python Code Version](#-using-python-code-version)
-  - [🔄 Updating the MKVmerge Version](#️-updating-the-mkvmerge-version)
+  - [🔄 Updating the MKVmerge Version](#-updating-the-mkvmerge-version)
+  - [⬆️ Checking For A Newer Application Release](#️-checking-for-a-newer-application-release)
 - [🎯 Usage Notes](#-usage-notes)
 - [📁 Supported Extensions](#-supported-extensions)
 - [🧪 Running Tests](#-running-tests)
@@ -58,7 +59,7 @@ Advanced MKV Muxer is a robust application for muxing (merging) videos with subt
 - **Chapter Options**: Add new chapters to each video file, reorder to match the right video, and remove files from the chapter tab.
 - **Attachment Options**: Add new attachments to all video files, discard old attachments, attach files/folders per video (expert mode), and prevent adding duplicate existing attachments.
 - **Source Files Options**: Discard old subtitles/audios, keep only specific languages/track IDs while discarding others, set old tracks to default/forced, and modify existing tracks individually.
-- **Muxing Options**: Override global settings per file, save a log file, set default directories/languages/extensions, optimize muxing by modifying source files, and check for MKVToolNix updates with one click.
+- **Muxing Options**: Override global settings per file, save a log file, set default directories/languages/extensions, optimize muxing by modifying source files, and check for MKVToolNix and application updates with one click.
 
 ---
 
@@ -157,6 +158,7 @@ A quick guide to the main feature categories. Click each to expand the full deta
 - Set your default directories, languages, and file extensions to be remembered for future runs
 - Optimize your muxing by modifying the source file when feasible. A prompt will appear when this option is available
 - Check for new MKVToolNix releases from the options dialog: the installed `mkvmerge`/`mkvpropedit` versions are shown, and a newer release can be downloaded and installed for the current platform with one click
+- Check for new Advanced MKV Muxer releases from the options dialog: the installed app version is shown, and when a newer release exists its version is displayed with a button that opens the release page
 
 </details>
 
@@ -166,7 +168,7 @@ A quick guide to the main feature categories. Click each to expand the full deta
 
 ### 📦 Pre-built Releases
 
-Advanced MKV Muxer is compatible with Windows 7/8/8.1/10/11 32-bit/64-bit and most Linux distributions. You can download it from the project's [releases page](https://github.com/FlamingWater35/advanced-mkv-muxer/releases).
+Advanced MKV Muxer runs on 64-bit Windows 10 (1809 or later) and Windows 11, and on 64-bit x86_64 Linux. 32-bit builds are not produced: Qt 6 and the PySide6 wheels this app depends on are 64-bit only, and the bundled MKVToolNix binaries are x86_64 as well. You can download it from the project's [releases page](https://github.com/FlamingWater35/advanced-mkv-muxer/releases).
 
 **For Windows Users**
 
@@ -177,7 +179,9 @@ Two builds are published:
 
 ### 🐧 For Linux Users
 
-The deployed app available in downloads only support glibc 2.35 and above like: Ubuntu 22.04/up, Mint 21.2/up, Fedora 38/up and others. Before starting the app, install the following libraries (not always needed as most of them included in the app):
+Two Linux builds are published: an **AppImage** (`...-linux-x64.AppImage`, make it executable and run it) and a **tarball** (`...-linux-x64.tar.gz`, unpack it and run `Advanced-MKV-Muxer` from the unpacked folder).
+
+Both are built on Ubuntu 22.04, so they require glibc 2.35 or newer: Ubuntu 22.04 and up, Mint 21.2 and up, Fedora 38 and up and other current distributions. Before starting the app, install the following libraries (not always needed as most of them are included in the app):
 
 ```bash
 sudo apt-get install -y libpugixml-dev
@@ -188,28 +192,34 @@ sudo apt install libxcb-cursor0
 ### 💻 Using Python Code Version
 
 1. Clone the repository: `git clone https://github.com/FlamingWater35/advanced-mkv-muxer.git`.
-2. The main branch uses `PySide6` library on version `6.12.0`, tested on `Python 3.12`, and only supports x64 systems.
-3. If you want to use on x32 systems you should switch to branch `develop-PySide2`: `git checkout develop-pyside2` which uses `PySide2 v5.14.0` and tested in `python 3.8.10`.
-4. After selecting the branch just make sure to use the mentioned python version as it's guaranteed to work perfect.
-5. Just run `pip install -r requirements.txt`.
-6. Then run `python main.py` and you are all good.
-7. You may use `python3/pip3` instead of `python/pip` depending on your system.
-8. For Linux users if you want to use another python version from the one that is already on your system it's recommended to use `pyenv`, if you didn't hear about it, you may read [this](https://askubuntu.com/a/1195153).
-9. Also, for Linux users: as this app depends on mkvtoolnix it's very recommended to install it on your system before run the app from [here](https://mkvtoolnix.download/downloads.html).
+2. The app uses `PySide6 6.12.0` on `Python 3.12` and only runs on 64-bit systems — there is no 32-bit or PySide2 variant on this repository.
+3. Make sure you use Python 3.12: `requirements.txt` pins the exact dependency versions and the test suite asserts them.
+4. Just run `pip install -r requirements.txt`.
+5. Then run `python main.py` and you are all good.
+6. You may use `python3/pip3` instead of `python/pip` depending on your system.
+7. For Linux users if you want to use another python version from the one that is already on your system it's recommended to use `pyenv`, if you didn't hear about it, you may read [this](https://askubuntu.com/a/1195153).
+8. Also, for Linux users: as this app depends on mkvtoolnix it's very recommended to install it on your system before run the app from [here](https://mkvtoolnix.download/downloads.html).
 
 ### 🔄 Updating The MKVmerge Version
 
-The easiest way is the built-in updater: open **Options → MKVToolNix Tools**, which shows the installed `mkvmerge`/`mkvpropedit` versions, then press **Check for Updates**. If a newer release exists, **Update** downloads it from [mkvtoolnix.download](https://mkvtoolnix.download/downloads.html), verifies the checksum (Windows), installs the tools for the current platform and switches to them immediately. Updated tools are stored per user in the application data folder (or in `Data` for a portable copy), so the update also works for the portable build.
+The easiest way is the built-in updater: open **Options** and find the **MKVToolNix Tools** section, which shows the installed `mkvmerge`/`mkvpropedit` versions, then press **Check for Updates**. If a newer release exists, **Update** downloads it from [mkvtoolnix.download](https://mkvtoolnix.download/downloads.html), verifies the checksum (Windows), installs the tools for the current platform and switches to them immediately. Updated tools are stored per user in the application data folder (or in `Data` for a portable copy), so the update also works for the portable build.
 
 If you prefer to do it manually, you can still replace the files yourself — but do this only if you're sure of what you're doing, as it may require a reinstallation:
 
 ```bash
-# Navigate to the app's installation directory, e.g. on Windows:
-"Program Files (x86)\Advanced MKV Muxer"
+# Navigate to the app's installation directory, e.g. on Windows for the installer build:
+"%LOCALAPPDATA%\Programs\Advanced MKV Muxer"
+# or the folder you unpacked for the portable build
 # Go to Resources\Tools\ [your operating system], and replace mkvmerge.exe and mkvpropedit.exe with the newer version you have
 ```
 
 > For Linux users it's recommended to just clear `Resources\Tools\ [your operating system]` folder and then install mkvtoolnix on your system from [here](https://mkvtoolnix.download/downloads.html) and the app will automatically detect it.
+
+### ⬆️ Checking For A Newer Application Release
+
+Open **Options** and find the **Application Updates** section. It shows the version you are running; press **Check for Updates** and, if a newer release has been published, the new version number is displayed and an **Open Latest Release** button opens that release page in your browser, where you can download the current build for your platform. When you are already up to date, the section says so and the button stays hidden.
+
+The check reads the project's [releases](https://github.com/FlamingWater35/advanced-mkv-muxer/releases) from GitHub and does not download or install anything by itself.
 
 ---
 
