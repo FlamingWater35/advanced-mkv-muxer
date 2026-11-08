@@ -23,7 +23,7 @@
 
 ---
 
-## ✨ App Preview
+## 📷 App Preview
 
 _A preview of Advanced MKV Muxer in action:_
 
